@@ -5,6 +5,7 @@ import "./App.css";
 function App() {
   const [text, setText] = useState("");
   const [result, setResult] = useState("");
+  const [confidence, setConfidence] = useState(null);
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState("message");
   const [darkMode, setDarkMode] = useState(false);
@@ -20,6 +21,7 @@ function App() {
       });
 
       setResult(res.data.prediction);
+      setConfidence(res.data.confidence ?? null);
     } catch (error) {
       setResult("Error");
     } finally {
@@ -132,9 +134,28 @@ function App() {
           </div>
           </div>
         )}
+        {/* ── Confidence Score Bar (Enhancement) ── */}
+        {result && confidence !== null && result !== "Error" && (
+          <div className="mt-3 text-left">
+            <p className={`text-xs font-medium mb-1 ${ darkMode ? "text-gray-400" : "text-gray-600" }`}>
+              Model Confidence: {(Math.min(confidence * 50 + 50, 100)).toFixed(1)}%
+            </p>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all duration-500 ${
+                  result === "ham" ? "bg-green-500" :
+                  result === "spam" ? "bg-red-500" : "bg-orange-500"
+                }`}
+                style={{ width: `${Math.min(confidence * 50 + 50, 100).toFixed(1)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <button onClick={() => {
         setText("");
         setResult("");
+        setConfidence(null);
         setType("message");
         }} className="mt-3 w-full py-3 rounded-xl font-medium bg-gray-500 text-white hover:bg-gray-600 transition-all" >
         Reset
