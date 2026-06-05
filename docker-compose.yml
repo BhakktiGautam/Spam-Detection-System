@@ -28,6 +28,9 @@ services:
     environment:
       - PORT=3000
       - API=http://ml-api:5000/predict
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
     depends_on:
       - ml-api
     networks:
