@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 function App() {
   const [text, setText] = useState("");
   const [result, setResult] = useState("");
+  const [confidence, setConfidence] = useState(null);
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState("message");
   const [darkMode, setDarkMode] = useState(false);
@@ -33,6 +34,7 @@ const logout = () => {
         type: type,
       });
       setResult(res.data.prediction);
+      setConfidence(res.data.confidence ?? null);
     } catch (error) {
       setResult("Error");
     } finally {
@@ -53,6 +55,8 @@ const logout = () => {
     if (result === "smishing") return "bg-orange-400/20 backdrop-blur-md border border-white/30";
     return "bg-white/20 backdrop-blur-md border border-white/30";
   };
+
+  const confidencePct = confidence !== null ? Math.min(confidence * 50 + 50, 100).toFixed(1) : "0.0";
 
   return (
     <div className={`min-h-screen flex items-center justify-center px-4 transition-all duration-500 ${
@@ -143,8 +147,25 @@ const logout = () => {
             </div>
           )}
 
+          {result && confidence !== null && result !== "Error" && (
+            <div className="mt-3 text-left">
+              <p className={`text-xs font-medium mb-1 ${ darkMode ? "text-gray-400" : "text-gray-600" }`}>
+                Model Confidence: {confidencePct}%
+              </p>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all duration-500 ${
+                    result === "ham" ? "bg-green-500" :
+                    result === "spam" ? "bg-red-500" : "bg-orange-500"
+                  }`}
+                  style={{ width: `${confidencePct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <button
-            onClick={() => { setText(""); setResult(""); setType("message"); }}
+            onClick={() => { setText(""); setResult(""); setConfidence(null); setType("message"); }}
             className="mt-3 w-full py-3 rounded-xl font-medium bg-gray-500 text-white hover:bg-gray-600 transition-all"
           >
             Reset

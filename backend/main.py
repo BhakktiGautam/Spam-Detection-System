@@ -1,22 +1,32 @@
 import os
 import joblib
-from fastapi import FastAPI, HTTPException, APIRouter
+import numpy as np
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from backend.xai_service import XAIService
 from backend.config import FRONTEND_URL, BASE_URL, PORT
 xai_service = XAIService()
 
-# Load your models
-# Ensure these files are in the root directory
+# ── Resolve model paths relative to this file ────────────────────────────────
+# FIX: Use pathlib.Path so the app works regardless of the working directory.
+# Previously, hardcoded relative strings like "linear_svm_model.pkl" would
+# break whenever the process was not launched from the repo root.
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Open backend/main.py and update these lines:
-model = joblib.load("linear_svm_model.pkl")
-vectorizer = joblib.load("backend/tfidf_vectorizer.pkl")
+# ── Load ML models ────────────────────────────────────────────────────────────
+# FIX: label_encoder.pkl was never loaded here, causing /predict to return
+# a raw integer (0, 1, 2) instead of a human-readable label string like
+# "ham", "spam", or "smishing". The frontend's string comparisons
+# (result === "ham") would always evaluate to false with the old code.
+model         = joblib.load(BASE_DIR / "linear_svm_model.pkl")
+vectorizer    = joblib.load(BASE_DIR / "backend" / "tfidf_vectorizer.pkl")
+label_encoder = joblib.load(BASE_DIR / "label_encoder.pkl")
 
 app = FastAPI(title="Spam Detection System")
 
-# ── CORS setup ────────────────────────────────────────────────
+# ── CORS setup ────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -28,29 +38,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Prediction Model Input Schema ─────────────────────────────
+# ── Request schema ────────────────────────────────────────────────────────────
 class PredictIn(BaseModel):
     text: str
     type: str
 
-# ── Prediction Route ──────────────────────────────────────────
+# ── Prediction route ──────────────────────────────────────────────────────────
 @app.post("/predict")
 def predict(body: PredictIn):
+    """
+    Classify a message as ham, spam, or smishing.
+
+    Returns:
+        prediction (str): Human-readable label — "ham", "spam", or "smishing".
+        confidence (float): SVM decision-function score for the winning class.
+                            Higher absolute value = more confident prediction.
+    """
     try:
         vectorized_text = vectorizer.transform([body.text])
-        prediction = model.predict(vectorized_text)[0]
-        
-        # FIX: Convert numpy type to standard Python int
-        return {"prediction": int(prediction)}
+
+        # Get the raw predicted class index (0, 1, or 2)
+        raw_prediction = model.predict(vectorized_text)[0]
+
+        # FIX: Convert class index → string label using the label encoder
+        label = label_encoder.inverse_transform([raw_prediction])[0]
+
+        # ENHANCEMENT: Return a confidence score.
+        # LinearSVC does not support predict_proba(); use decision_function()
+        # instead. The score for each class is its distance from the boundary —
+        # a higher value means the model is more certain of that class.
+        scores = model.decision_function(vectorized_text)[0]
+        confidence = round(float(np.max(scores)), 4)
+
+        return {
+            "prediction": label,       # e.g. "ham", "spam", "smishing"
+            "confidence": confidence,  # e.g. 1.2345
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-# ── Basic health check ────────────────────────────────────────
+# ── Health / root ─────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {
-        "status": "ok",
-        "message": "Spam Detection API is running",
+        "status":   "ok",
+        "message":  "Spam Detection API is running",
         "base_url": BASE_URL,
     }
 
@@ -58,18 +90,18 @@ def root():
 def health():
     return {"status": "healthy"}
 
-# -- EMAIL DATABASE ROUTES (Issue #13) -------------------------
+# ── Routers ───────────────────────────────────────────────────────────────────
+# EMAIL DATABASE ROUTES (Issue #13)
 from backend.emails import router as emails_router
-# from backend.database import init_db # Uncomment if DB is set up
-
+# from backend.database import init_db  # Uncomment once DB is configured
 # init_db()
 app.include_router(emails_router)
 
-# ── Optional: run directly ─────────────────────────────────────
+# EXPORT ROUTES (Issue #23)
+from backend.export import router as export_router
+app.include_router(export_router)
+
+# ── Run directly ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="0.0.0.0", port=PORT, reload=True)
-
-# -- EXPORT ROUTES (Issue #23) ------------------------------------------------
-from backend.export import router as export_router
-app.include_router(export_router)
