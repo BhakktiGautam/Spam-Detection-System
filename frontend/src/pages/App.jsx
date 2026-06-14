@@ -6,6 +6,7 @@ import Register from "./Register.jsx";
 import api from "../utils/axiosInstance";
 import "../App.css";
 import FeatureImportance from "../components/FeatureImportance";
+import FeedbackWidget from "../components/FeedbackWidget";
 
 const THEMES = {
   ocean: {
@@ -78,15 +79,18 @@ function SpamDetector() {
   };
 
   const getColor = () => {
-    if (result === "ham") return "text-green-600";
-    if (result === "spam") return "text-red-600";
+    if (result === "ham" || result === "safe") return "text-green-600";
+    if (result === "spam" || result === "malicious") return "text-red-600";
     if (result === "smishing") return "text-orange-500";
-    return "text-gray-600";
+    if (result === "Error") {
+    return darkMode ? "text-yellow-300" : "text-yellow-700";
+  }
+  return darkMode ? "text-gray-300" : "text-gray-600";
   };
 
   const getBg = () => {
-    if (result === "ham") return "bg-[#81912F]/25 backdrop-blur-md border border-white/30";
-    if (result === "spam") return "bg-red-400/20 backdrop-blur-md border border-white/30";
+    if (result === "ham" || result === "safe") return "bg-[#81912F]/25 backdrop-blur-md border border-white/30";
+    if (result === "spam" || result === "malicious") return "bg-red-400/20 backdrop-blur-md border border-white/30";
     if (result === "smishing") return "bg-orange-400/20 backdrop-blur-md border border-white/30";
     return "bg-white/20 backdrop-blur-md border border-white/30";
   };
@@ -172,7 +176,7 @@ function SpamDetector() {
           </h1>
 
           <p className={`font-semibold text-sm mb-4 ${darkMode ? "text-gray-300" : "text-gray-700"}`}>
-            Analyze messages & emails instantly
+            Analyze messages, emails & URLs instantly
           </p>
 
           <div className="flex mb-4 bg-gray-100 rounded-xl overflow-hidden">
@@ -185,6 +189,7 @@ function SpamDetector() {
             >
               <option value="message">Message</option>
               <option value="email">Email</option>
+              <option value="url">URL</option>
             </select>
           </div>
 
@@ -193,7 +198,11 @@ function SpamDetector() {
               darkMode ? "bg-gray-700 text-white" : "bg-white text-black"
             }`}
             rows="4"
-            placeholder={type === "message" ? "Type your message..." : "Paste your email content..."}
+            placeholder={
+              type === "url" ? "Enter URL to check..." :
+              type === "message" ? "Type your message..." :
+              "Paste your email content..."
+            }
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -202,7 +211,7 @@ function SpamDetector() {
             onClick={handlePredict}
             className={`mt-4 w-full py-3 rounded-xl font-medium text-white active:scale-95 transition-all ${currentTheme.accent}`}
           >
-            {loading ? "Analyzing..." : `Analyze ${type}`}
+            {loading ? "Analyzing..." : `Analyze ${type === "url" ? "URL" : type}`}
           </button>
 
           {result && (
@@ -211,6 +220,8 @@ function SpamDetector() {
                 {result === "ham" && "✅ Safe Message"}
                 {result === "spam" && "🚫 Spam Detected"}
                 {result === "smishing" && "⚠️ Fraud Alert"}
+                {result === "safe" && "✅ Safe URL"}
+                {result === "malicious" && "🚨 Malicious URL"}
                 {result === "Error" && "⚠️ Something went wrong"}
               </div>
             </div>
@@ -233,6 +244,15 @@ function SpamDetector() {
             </div>
           )}
 
+          {result && result !== "Error" && type !== "url" && (
+            <FeedbackWidget
+              key={`${text}|${result}|${confidence}`}
+              text={text}
+              predictedLabel={result}
+              darkMode={darkMode}
+            />
+          )}
+
           <button
             onClick={() => { setText(""); setResult(""); setConfidence(null); setType("message"); }}
             className="mt-3 w-full py-3 rounded-xl font-medium bg-gray-500 text-white hover:bg-gray-600 transition-all"
@@ -248,4 +268,4 @@ function SpamDetector() {
   );
 }
 
-export default App;
+export default SpamDetector;
