@@ -27,9 +27,14 @@ Run this from the backend/ directory:
 
 import argparse
 import os
+        feature
+import pickle
+from collections import Counter
+
 import shutil
 import sys
 from datetime import datetime
+        main
 
 import pandas as pd
 import joblib
@@ -53,6 +58,30 @@ def backup_existing_files():
     files_to_backup = [MODEL_PATH, VECTORIZER_PATH, LABEL_ENCODER_PATH]
     existing = [f for f in files_to_backup if os.path.exists(f)]
 
+        feature
+    label_encoder = LabelEncoder()
+    y = label_encoder.fit_transform(labels)
+
+    # Hold out a test split when there's enough data per class to stratify;
+    # otherwise train on everything and skip the report.
+    counts = Counter(y)
+    can_split = len(samples) >= 5 and min(counts.values()) >= 2
+    if can_split:
+        X_train, X_test, y_train, y_test = train_test_split(
+            texts, y, test_size=0.2, random_state=42, stratify=y
+        )
+    else:
+        X_train, y_train = texts, y
+        X_test, y_test = [], []
+        print("Not enough samples per class for a held-out test split; "
+              "training on all available data.")
+
+    # Fit TF-IDF vectorizer with max_features=5000 to match model
+    print("\nFitting TfidfVectorizer (max_features=5000)...")
+    vectorizer = TfidfVectorizer(max_features=5000)
+    X_train_vec = vectorizer.fit_transform(X_train)
+    print(f"Vocabulary size: {len(vectorizer.vocabulary_)}")
+
     if not existing:
         print("No existing model files found to back up (first-time training).")
         return
@@ -71,6 +100,7 @@ def load_dataset(path):
     df = pd.read_csv(path)
     if "text" not in df.columns and "message" in df.columns:
         df.rename(columns={"message": "text"}, inplace=True)
+        main
 
     if "text" not in df.columns or "label" not in df.columns:
         print("Dataset CSV must have 'text' (or 'message') and 'label' columns.")
