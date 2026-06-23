@@ -17,14 +17,37 @@ const FormData = require("form-data");
 
 const app = express();
 
-// Connect to MongoDB Atlas
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log("✅ MongoDB connected");
-    seedAdminUser();  // ✅ Inside .then()
-  })
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+// Connect to MongoDB WITH RETRY
+const connectWithRetry = async (retries=5, delay=5000) => {
+  console.log("Attempting to connect to MongoDB...");
+  console.log('Max retries:', retries, 'Delay between retries (ms):', delay);
+
+  for(let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI);
+            console.log(`✅ MongoDB connected successfully (attempt ${attempt})`);
+            seedAdminUser();
+            return true;
+    } catch (err) {
+      console.error(`❌ MongoDB connection attempt ${attempt} failed:`, err.message);
+      
+      if (attempt === retries) {
+        console.error("Max retries reached. Exiting process.");
+        console.error("Please check your MongoDB connection string and ensure the database is accessible.");
+        console.error('1.MongoDB is running');
+        console.error('2.MongoDB URI is correct in .env file');
+        console.error('   3. Network connectivity\n');
+                process.exit(1);
+            }
+            
+            console.log(`⏳ Waiting ${delay/1000}s before retry...\n`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+};
+
+// Start connection with retry
+connectWithRetry();
 
 app.use(cors());
 app.use(express.json());
