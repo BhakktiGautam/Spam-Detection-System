@@ -8,7 +8,10 @@ const express = require("express");
 const seedAdminUser = require("./seeders/adminSeeder");
 const { getHealthStatus } = require('./utils/healthCheck');
 const cors = require("cors");
+const config = require('./config');
+const compression = require('compression');
 const { v4: uuidv4 } = require('uuid');
+const helmet = require('helmet');
 const axios = require("axios");
 
 // Configure global request interceptor to append the internal secret API key
@@ -33,18 +36,122 @@ const FormData = require("form-data");
 
 const app = express();
 
-// Connect to MongoDB Atlas
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log("✅ MongoDB connected");
-    seedAdminUser();  // ✅ Inside .then()
-  })
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+const Sentry = require("@sentry/node");
 
-app.use(cors());
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || "development",
+  tracesSampleRate: 1.0,
+  integrations: [
+    new Sentry.Integrations.Http({ tracing: true }),
+  ],
+});
+
+// Request handler - adds tracing context
+app.use(Sentry.Handlers.requestHandler());
+
+//Tracing handler - creates a trace for every incoming request
+app.use(Sentry.Handlers.tracingHandler());
+
+// Connect to MongoDB WITH RETRY
+const connectWithRetry = async (retries=5, delay=5000) => {
+  console.log("Attempting to connect to MongoDB...");
+  console.log('Max retries:', retries, 'Delay between retries (ms):', delay);
+
+  for(let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await mongoose.connect(config.mongodbUri);
+            console.log(`✅ MongoDB connected successfully (attempt ${attempt})`);
+            seedAdminUser();
+            return true;
+    } catch (err) {
+      console.error(`❌ MongoDB connection attempt ${attempt} failed:`, err.message);
+      
+      if (attempt === retries) {
+        console.error("Max retries reached. Exiting process.");
+        console.error("Please check your MongoDB connection string and ensure the database is accessible.");
+        console.error('1.MongoDB is running');
+        console.error('2.MongoDB URI is correct in .env file');
+        console.error('   3. Network connectivity\n');
+                process.exit(1);
+            }
+            
+            console.log(`⏳ Waiting ${delay/1000}s before retry...\n`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+};
+
+//MONGODB CONNECTION POOL MONITORING
+const monitorConnectionPool = () => {
+  setInterval(() => {
+    try {
+      const pool = mongoose.connection.client.topology.s.pool;
+      if(pool) {
+        const size= pool.size||0;
+        const available= pool.availableConnections||0;
+        const used= pool.usedCount||0;
+        const usagePercent = size > 0 ? (used / size) * 100 : 0;
+
+        console.log(`[DB Pool] Size: ${size}, Available: ${available}, Used: ${used} (${usagePercent}%)`);
+
+        //Alert if usage exceeds 80%
+        if(usagePercent > 80){
+          console.warn(`[DB Pool] ⚠️ High connection pool usage: ${usagePercent.toFixed(2)}%`);
+        }
+      }
+    } catch (err) {
+    }
+  },3000); // every 3 seconds
+};
+
+//Call after MONGODB connection is established
+mongoose
+    .connect(process.env.MONGODB_URI)
+    .then(() => {
+        console.log("✅ MongoDB connected");
+        monitorConnectionPool(); // 👈 Add this line
+        seedAdminUser();
+    })
+    .catch((err) => console.error("❌ MongoDB connection error:", err));
+
+
+if(process.env.NODE_ENV === 'development'){
+  //Log all queries in development mode
+  mongoose.set('debug',true);
+} else {
+  // Log only slow queries in production mode
+  const originalExec = mongoose.Query.prototype.exec;
+  mongoose.Query.prototype.exec = async function() {
+    const start = Date.now();
+    const result = await originalExec.apply(this, arguments);
+    const duration = Date.now() - start;
+
+    if(duration > 100){ // Log queries taking longer than 100ms
+      console.log(`🐢 [${new Date().toISOString()}] Slow Query (${duration}ms):`);
+      console.log(`   Collection: ${this._collection.collectionName}`);
+      console.log(`   Query:`, JSON.stringify(this._conditions));
+    }
+
+    return result;
+    };
+}
+
+// Start connection with retry
+connectWithRetry();
+
+const corsOptions = {
+  origin: config.corsOrigins,
+  credentials: true,
+};
+app.use(cors(corsOptions));
+app.use(helmet());
+app.use(compression());
+app.use(express.json());
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use('/uploads', express.static('uploads'));
+
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
@@ -83,6 +190,7 @@ const historyRoutes = require("./routes/historyRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const ruleRoutes = require("./routes/ruleRoutes");
+const reportRoutes = require("./routes/reportRoutes");
 
 // Versioned routes (v1)
 app.use("/api/v1/auth", authRoutes);
@@ -90,6 +198,7 @@ app.use("/api/v1/history", historyRoutes);
 app.use("/api/v1/analytics", analyticsRoutes);
 app.use("/api/v1/chat", chatRoutes);
 app.use("/api/v1/rules", ruleRoutes);
+app.use("/api/v1/reports", reportRoutes);
 
 // Keep old routes for backward compatibility
 app.use("/api/auth", authRoutes);
@@ -97,6 +206,7 @@ app.use("/api/history", historyRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/rules", ruleRoutes);
+app.use("/api/reports", reportRoutes);
 
 const { protect } = require("./middleware/authMiddleware");
 
@@ -270,10 +380,23 @@ app.post("/feedback", protect, async (req, res) => {
 
     res.status(response.status).json(response.data);
   } catch (error) {
+    // Capture error in Sentry with context
+    Sentry.captureException(error, {
+      tags: {
+        endpoint: '/feedback',
+        userId: req.user?.id || 'anonymous'
+      },
+      extra: {
+        text: text?.substring(0, 100), // Truncate for privacy
+        predicted_label,
+        correct_label
+      }
+    });
+
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
     }
-    console.error(error.message);
+    console.error(`[${req.requestId}] Feedback error:`, error.message);
     res.status(500).json({ error: "Something went wrong" });
   }
 });
@@ -836,6 +959,7 @@ app.post("/scan-emails", protect, async (req, res) => {
   }
 });
 
+const PORT = config.port;
 app.use((err, req, res, next) => {
   if(err.type==='entity.too.large' || err.message==='request entity too large') {
     return res.status(413).json({

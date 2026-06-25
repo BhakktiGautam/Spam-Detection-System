@@ -624,12 +624,30 @@ export default function EmailScannerDashboard() {
                             </span>
                             <span className="opacity-50 text-[10px] shrink-0 font-semibold">{formattedDate}</span>
                           </div>
-                          <p className="font-semibold text-slate-800 dark:text-slate-200 truncate pr-4">
+                          <p className="font-semibold text-slate-800 dark:text-slate-200 truncate pr-4" title={email.subject || "No Subject"}>
                             {email.subject || "No Subject"}
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-3 shrink-0">
+                          {(email.confidence_score != null || email.confidence != null) && (() => {
+                            const confValue = email.confidence_score != null ? email.confidence_score : email.confidence;
+                            const confPct = Math.min(confValue * 50 + 50, 100);
+                            return (
+                              <div className="hidden sm:flex items-center gap-1.5 w-24" title="Confidence Score">
+                                <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden flex items-center">
+                                  <div 
+                                    style={{ 
+                                      width: `${confPct}%`,
+                                      backgroundColor: email.prediction === 'spam' || email.prediction === 'malicious' ? '#ef4444' : email.prediction === 'smishing' ? '#f97316' : '#22c55e'
+                                    }} 
+                                    className="h-full rounded-full"
+                                  />
+                                </div>
+                                <span className="text-[9px] font-bold opacity-60 w-6 text-right">{confPct.toFixed(0)}%</span>
+                              </div>
+                            );
+                          })()}
                           <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase border ${getPredictionColor(email.prediction)}`}>
                             {email.prediction}
                           </span>
