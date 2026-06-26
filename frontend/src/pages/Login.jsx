@@ -18,8 +18,7 @@ const Login = () => {
             const response = await axios.post('/api/auth/login', {
                 email,
                 password
-            });
-            
+            });            
             if (response.data.token) {
                 localStorage.setItem('token', response.data.token);
                 navigate('/dashboard');
