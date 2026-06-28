@@ -50,7 +50,7 @@ function SpamDetector() {
   }
   if (trimmed.length < 160 && !trimmed.includes('\n')) return 'sms';
   return 'message';
-};
+
 
   const [darkMode, setDarkMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -95,9 +95,12 @@ function SpamDetector() {
       setConfidence(res.data.confidence ?? null);
     } catch {
       setExplanation(res.data.explanation ?? null);
-    } catch (error) {
       setResult("Error");
-    } finally {
+    }
+    // catch (error) {
+    //   setResult("Error");
+    // }
+     finally {
       setLoading(false);
     }
   };
@@ -109,8 +112,7 @@ function SpamDetector() {
 
   const confidenceValue = Number(confidencePct);
 
-  const riskLevel =
-    confidenceValue >= 80 ? "High" : confidenceValue >= 50 ? "Medium" : "Low";
+  const riskLevel = confidenceValue >= 80 ? "High" : confidenceValue >= 50 ? "Medium" : "Low";
 
   return (
     <div
@@ -122,9 +124,9 @@ function SpamDetector() {
       <div className="absolute top-4 right-4 flex gap-3 flex-wrap justify-end">
         <button
           onClick={() => setThemeMode(isDark ? 'light' : 'dark')}
-          onClick={() => {
-            setThemeMode(isDark ? 'light' : 'dark');
-          }}
+          // onClick={() => {
+          //   setThemeMode(isDark ? 'light' : 'dark');
+          // }}
           className="px-4 py-2.5 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-2 shadow-md"
           style={{
             background: isDark ? '#fbbf24' : '#1e293b',
@@ -179,10 +181,7 @@ function SpamDetector() {
               });
               localStorage.setItem('user', JSON.stringify(res.data.user));
               window.location.reload();
-            } catch(err) {
-              alert('Failed to upload avatar: ' + (err.response?.data?.error || err.message));
-            }
-             const file = e.target.files[0];
+               const file = e.target.files[0];
              if (!file) return;
              const formData = new FormData();
              formData.append('avatar', file);
@@ -197,6 +196,9 @@ function SpamDetector() {
              } catch(err) {
                 alert('Failed to upload avatar: ' + (err.response?.data?.error || err.message));
              }
+            } catch(err) {
+              alert('Failed to upload avatar: ' + (err.response?.data?.error || err.message));
+            }
           }} />
         </label>
         <span
@@ -635,7 +637,7 @@ function SpamDetector() {
         {riskLevel === "High" && "🔴 High"}
       </span>
     </div>
-
+  
     {/* Copy Full Report Button */}
     <div className="mt-4 mb-4">
       <button
@@ -701,7 +703,7 @@ Powered by Spam Detection System`;
         "No suspicious patterns were detected in this content."}
     </p>
   </div>
-)}
+
                   </div>
                 )}
 
@@ -750,7 +752,8 @@ Powered by Spam Detection System`;
       <Footer />
       <Chatbot />
     </div>
-  );
-}
+  )};
+
+
 
 export default SpamDetector;

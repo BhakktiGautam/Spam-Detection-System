@@ -1318,12 +1318,12 @@ app.get('/api/history/search',protect, async(req,res) => {
 // START SERVER
 // ========================================
 
-const PORT = config.port;
-const server = app.listen(PORT, () => {
-  const totalTime = Date.now() - SERVER_START_TIME;
-  displayBanner();
-  console.log(`⏱️ Total startup time: ${totalTime}ms`);
-});
+// const PORT = config.port;
+// const server = app.listen(PORT, () => {
+//   const totalTime = Date.now() - SERVER_START_TIME;
+//   displayBanner();
+//   console.log(`⏱️ Total startup time: ${totalTime}ms`);
+// });
 // Listen for termination signals
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
