@@ -17,9 +17,9 @@ import SpamInsightsDashboard from "../components/SpamInsightsDashboard";
 import EmailScannerDashboard from "../components/EmailScannerDashboard";
 import Chatbot from "../components/Chatbot";
 import Footer from "../components/Footer";
-//import InstallAppButton from "../components/InstallAppButton";
-//import PredictionExplanation from "../components/PredictionExplanation";
-//import RulesManager from "../components/RulesManager";
+import InstallAppButton from "../components/InstallAppButton";
+import PredictionExplanation from "../components/PredictionExplanation";
+import RulesManager from "../components/RulesManager";
 
 function App() {
   const navigate = useNavigate();
