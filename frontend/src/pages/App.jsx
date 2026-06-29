@@ -9,6 +9,7 @@ import History from "../components/History";
 import WordCloud from "../components/WordCloud";
 import FeedbackWidget from "../components/FeedbackWidget";
 import Login from "./Login.jsx";
+import confetti from 'canvas-confetti';
 import Register from "./Register.jsx";
 import EmailHeaderAnalyzer from "../components/EmailHeaderAnalyzer";
 import BulkSpamDetection from "../components/BulkSpamDetection";
@@ -29,6 +30,10 @@ function App() {
   const [explanation, setExplanation] = useState(null); 
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState("message");
+  const [hasCelebrated, setHasCelebrated] = useState(() => {
+    return localStorage.getItem('firstPrediction') === 'true';
+});
+  const [showCelebration, setShowCelebration] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const detectType = (text) => {
@@ -75,80 +80,42 @@ function App() {
     THEME_PALETTES,
   } = useTheme();
 
-// Map a failed /predict request to a user-facing title, message and whether
-// a retry is worth offering. Prefers the structured fields the Express layer
-// returns (code/retryable), with sensible fallbacks for network errors.
-const classifyPredictError = (error) => {
-  const data = error?.response?.data;
-  const status = error?.response?.status;
-  const code = data?.code;
+  const handlePredict = async () => {
+    if (!text || text.trim().length === 0) return;
+    try {
+      setLoading(true);
+      const res = await api.post(`${import.meta.env.VITE_API_URI}/predict`, {
+        text: text,
+        type: type,
+      });
+    if (!hasCelebrated) {
+    triggerConfetti();
+    setHasCelebrated(true);
+    localStorage.setItem('firstPrediction', 'true');
+    }
 
-  if (code === "ML_TIMEOUT") {
-    return {
-      title: "Request timed out",
-      message: data.error || "The analysis service took too long to respond.",
-      retryable: true,
-    };
-  }
-  if (code === "ML_SERVICE_UNAVAILABLE") {
-    return {
-      title: "Service unavailable",
-      message: data.error || "The analysis service is currently unavailable.",
-      retryable: true,
-    };
-  }
-  if (code === "ML_SERVICE_ERROR") {
-    return {
-      title: "Analysis failed",
-      message: data.error || "The analysis service encountered an error.",
-      retryable: true,
-    };
-  }
-  if (code === "INVALID_INPUT" || (status >= 400 && status < 500)) {
-    return {
-      title: "Invalid input",
-      message:
-        data?.error || "Your message could not be analyzed. Please review it and try again.",
-      retryable: false,
-    };
-  }
-  // No response (network failure / CORS / server down) or unknown error.
-  if (!error?.response) {
-    return {
-      title: "Connection problem",
-      message: "Couldn't reach the server. Check your connection and try again.",
-      retryable: true,
-    };
-  }
-  return {
-    title: "Something went wrong",
-    message: data?.error || "An unexpected error occurred. Please try again.",
-    retryable: true,
+      setResult(res.data.prediction);
+      setConfidence(res.data.confidence ?? null);
+    } catch (error) {
+      setResult("Error");
+      setExplanation(null);
+    } finally {
+      setLoading(false);
+    }
   };
-};
 
-const handlePredict = async () => {
-  if (!text || text.trim().length === 0) return;
-  try {
-    setLoading(true);
-    setErrorInfo(null);
-    const res = await api.post(`${import.meta.env.VITE_API_URI}/predict`, {
-      text: text,
-      type: type,
-    });
-    setResult(res.data.prediction);
-    setConfidence(res.data.confidence ?? null);
-    setExplanation(res.data.explanation ?? null);
-  } catch (err) {
-    console.error("Predict error:", err);
-    setResult("Error");
-    setExplanation(null);
-    setConfidence(null);
-    setErrorInfo(classifyPredictError(err));
-  } finally {
-    setLoading(false);
-  }
-};
+  const triggerConfetti = () => {
+    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    setTimeout(() => {
+        confetti({ particleCount: 50, spread: 50, origin: { y: 0.6, x: 0.3 } });
+    }, 200);
+    setTimeout(() => {
+        confetti({ particleCount: 50, spread: 50, origin: { y: 0.6, x: 0.7 } });
+    }, 400);
+    setTimeout(() => {
+        setShowCelebration(true);
+    }, 500);
+  };
 
   const confidencePct =
     confidence !== null
@@ -835,14 +802,52 @@ Powered by Spam Detection System`;
               <EmailHeaderAnalyzer />
             )}
             <WordCloud darkMode={isDark} />
+            {showCelebration && (
+    <div className="celebration-modal" style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000
+    }}>
+        <div style={{
+            background: 'white',
+            padding: '40px',
+            borderRadius: '20px',
+            textAlign: 'center',
+            maxWidth: '400px',
+            width: '90%'
+        }}>
+            <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
+            <h2 style={{ color: '#7c3aed' }}>First Prediction Complete!</h2>
+            <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+                You're on your way to becoming a spam detection expert!
+            </p>
+            <button 
+                onClick={() => setShowCelebration(false)} 
+                style={{
+                    padding: '10px 30px',
+                    background: '#7c3aed',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                }}
+            >
+                Continue Learning →
+            </button>
+        </div>
+    </div>
+)}
           </div>
         </div>
       </div>
       <Footer />
       <Chatbot />
     </div>
-  )};
-
-
-
+  );
+}
+  
 export default App;
