@@ -102,6 +102,29 @@ pickle.dump(vectorizer, open("vectorizer.pkl", "wb"))
 
 ## 🐍 Python API (Flask)
 
+### Running the Backend API
+
+This project contains two backend implementations. You can choose to run either Flask or FastAPI.
+
+**Option 1: Running Flask (api.py)**
+```bash
+cd backend
+python api.py
+```
+
+The Flask ML API binds to `127.0.0.1` (localhost only) with the debugger
+disabled by default. These are controlled via environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FLASK_PORT` | `5000` | Port the API listens on. |
+| `FLASK_HOST` | `127.0.0.1` | Interface to bind. Use `0.0.0.0` to expose on all interfaces **only behind a trusted proxy**. |
+| `FLASK_DEBUG` | `false` | Enables the Werkzeug debugger. Keep off outside local development — it allows remote code execution. |
+
+> ⚠️ Never run with `FLASK_DEBUG=true` while bound to a non-loopback host. The
+> app refuses to start for that combination to prevent exposing the interactive
+> debugger over the network.
+
 ### 📦 Install Dependencies
 
 ```bash
@@ -139,6 +162,78 @@ if __name__ == "__main__":
 ```bash
 npm install express axios cors
 ```
+
+## 🧠 Explainable AI (XAI)
+
+The Spam Detection System now returns human-readable explanation details with every prediction. This includes example reasons, matched spam keywords, triggered spam indicators, and a risk score.
+
+### 🧾 Prediction API Response
+
+```json
+{
+  "input": "Claim your reward now!",
+  "result": "spam",
+  "prediction": "spam",
+  "confidence": 1.2345,
+  "domain_analysis": {
+    "domains_found": [],
+    "max_risk_score": 0,
+    "overall_risk": "SAFE",
+    "details": []
+  },
+  "explanation": {
+    "score": 94,
+    "reasons": [
+      "Suspicious URL detected",
+      "Promotional keywords found",
+      "Urgency language detected"
+    ],
+    "matched_keywords": [
+      "claim",
+      "reward",
+      "free"
+    ],
+    "spam_patterns": {
+      "urls": true,
+      "capitalization": false,
+      "punctuation": false,
+      "urgency": true,
+      "promotional": true,
+      "financial": false,
+      "banking": false,
+      "otp": false,
+      "crypto": false,
+      "lottery": false,
+      "threat": false,
+      "emoji": false,
+      "suspicious_domain": false,
+      "phone_number": false,
+      "shortened_url": false
+    },
+    "num_indicators": 3,
+    "top_indicators": [
+      "Suspicious URL detected",
+      "Promotional keywords found",
+      "Urgency language detected"
+    ],
+    "summary": "3 indicators triggered"
+  }
+}
+```
+
+### 💡 Example Request
+
+```bash
+curl -X POST http://localhost:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Urgent! Claim your prize now at https://bit.ly/offer","type":"message"}'
+```
+
+### 📌 Notes
+
+* The response is backward compatible with existing integrations.
+* `result` and `prediction` both return the same label.
+* `explanation` is optional in older API clients, but modern clients can use it to display detailed spam reasoning.
 
 ## Mongo Db Atlas Backend
 .env
@@ -724,6 +819,25 @@ are not covered by automated tests in this PR.
 - [Docker](https://docs.docker.com/get-docker/) installed
 - [Docker Compose](https://docs.docker.com/compose/install/) installed
 
+### 🔧 Environment Configuration
+
+Before running `docker-compose up`, create a `.env` file in the project root with the following required variables:
+
+| Variable | Description | Required | Example |
+|----------|-------------|----------|---------|
+| `JWT_SECRET` | Secret key for JWT token generation | ✅ Yes | `your-super-secret-jwt-key-12345` |
+| `MONGODB_URI` | MongoDB connection string | ✅ Yes | `mongodb://localhost:27017/spam-detection` |
+| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID | ✅ Yes | `123456789-abcdefg.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 Client Secret | ✅ Yes | `GOCSPX-abcdefghijklmnop` |
+| `API_URL` | ML Prediction API URL | ✅ Yes | `http://localhost:5000/predict` |
+| `FRONTEND_URL` | Frontend URL | ✅ Yes | `http://localhost:5173` |
+| `VITE_API_URI` | Backend API URL (Frontend) | ✅ Yes | `http://localhost:3000/api` |
+
+
+# Frontend
+VITE_API_URI=http://localhost:3000/api
+VITE_ML_API_URI=http://localhost:5000/predict
+
 ### Docker Hub Images
 
 Pre-built images are available — no build step required:
@@ -795,5 +909,3 @@ This project is open-source and available under the MIT License.
 You are free to use, modify, and distribute this project for personal or commercial use, provided that proper credit is given.
 
 For more details, see the [LICENSE](LICENSE) file.
-
-

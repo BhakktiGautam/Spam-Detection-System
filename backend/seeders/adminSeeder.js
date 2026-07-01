@@ -15,6 +15,11 @@ const seedAdminUser = async () => {
         ],
       });
 
+            console.log('Admin user created successfully');
+            console.log(`Email: ${email}`);
+            console.log(`Password: ${password}`);
+        }
+        console.error('Error seeding admin user:', error);
       if (!adminExists) {
         await User.create({
           username: "admin",
@@ -23,7 +28,6 @@ const seedAdminUser = async () => {
           password,
           role: "admin",
         });
-      }
 
       console.log("Admin user created successfully");
       console.log(`Email: ${email}`);

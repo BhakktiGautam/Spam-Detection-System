@@ -1,17 +1,24 @@
 from flask import Flask, request, jsonify
 import csv
 import joblib
+import numpy as np
 import os
 import re
+import hmac
 from collections import Counter
 from urllib.parse import urlparse
+from functools import wraps
 from dotenv import load_dotenv
 from domain_checker import analyze_text
 from email_header_analyzer import analyze_headers
+from explanation_engine import ExplanationEngine
 from pathlib import Path
 from flask_cors import CORS
 import sys
+from filelock import FileLock
 import requests
+from routes.analytics import analytics_bp
+from routes.analytics import record_scan
 
 # Try to import NLTK for stopwords (optional)
 try:
@@ -35,37 +42,88 @@ from apscheduler.schedulers.background import BackgroundScheduler
 load_dotenv()
 
 app = Flask(__name__)
-ALLOWED_ORIGIN = os.getenv("NODE_GATEWAY_ORIGIN", "http://localhost:3000")
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGIN}})
 
-from functools import wraps
-from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, verify_jwt_in_request
-app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "super-secret")
-jwt = JWTManager(app)
+xai_engine = ExplanationEngine()
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
-def jwt_or_secret_required():
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            secret = request.headers.get("X-Internal-Secret")
-            expected_secret = os.getenv("INTERNAL_SECRET", "super-secret-internal-key")
-            if secret and secret == expected_secret:
-                return fn(*args, **kwargs)
-            verify_jwt_in_request()
-            return fn(*args, **kwargs)
-        return wrapper
-    return decorator
+# Shared secret that the trusted Node/Express backend attaches to every request
+# (see the axios interceptor in server.js). Enforcing it on every ML API call
+# ensures the model endpoints can't be hit directly by clients that merely have
+# network access to the Flask port.
+#
+# This is mandatory configuration: there is intentionally NO hardcoded fallback,
+# because a default baked into source code is public and would defeat the gate
+# entirely. The service refuses to start unless a sufficiently long secret is
+# supplied via the environment (matching the value the Node service sends).
+INTERNAL_SECRET_MIN_LENGTH = 32
 
-def get_current_user_identity():
-    secret = request.headers.get("X-Internal-Secret")
-    expected_secret = os.getenv("INTERNAL_SECRET", "super-secret-internal-key")
-    if secret and secret == expected_secret:
-        return request.headers.get("X-User-Username")
-    try:
-        return get_jwt_identity()
-    except Exception:
+
+def _load_internal_secret():
+    secret = os.getenv("INTERNAL_SECRET")
+    if not secret:
+        raise RuntimeError(
+            "INTERNAL_SECRET is not set. This shared secret authenticates "
+            "requests from the Node/Express backend and is mandatory. Generate "
+            "one with `python -c \"import secrets; print(secrets.token_urlsafe(32))\"` "
+            "and set it (identically) for both the Node and Flask services."
+        )
+    if len(secret) < INTERNAL_SECRET_MIN_LENGTH:
+        raise RuntimeError(
+            f"INTERNAL_SECRET is too short ({len(secret)} characters); it must "
+            f"be at least {INTERNAL_SECRET_MIN_LENGTH} characters. Generate a "
+            "strong value with "
+            "`python -c \"import secrets; print(secrets.token_urlsafe(32))\"`."
+        )
+    return secret
+
+
+INTERNAL_SECRET = _load_internal_secret()
+
+# Paths reachable without the internal secret (liveness/readiness probes).
+PUBLIC_PATHS = {"/", "/health"}
+
+
+@app.errorhandler(500)
+@app.errorhandler(Exception)
+def handle_internal_error(e):
+    # Never leak tracebacks or the interactive debugger to clients. Werkzeug
+    # HTTP errors (404, 403, ...) keep their own status; everything else is a
+    # generic 500 so internal details stay in the server logs only.
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    app.logger.exception("Unhandled exception while processing request")
+    return jsonify({"error": "Internal server error"}), 500
+
+
+@app.before_request
+def require_internal_secret():
+    # During automated tests the gate is off by default so unit tests can call
+    # ML routes directly; the dedicated security test opts in by setting
+    # app.config["ENFORCE_INTERNAL_SECRET"] = True. In real deployments TESTING
+    # is never set, so the gate is always active.
+    if app.config.get("TESTING") and not app.config.get("ENFORCE_INTERNAL_SECRET"):
         return None
+    # Let CORS preflight requests through; they never carry custom headers.
+    if request.method == "OPTIONS":
+        return None
+    if request.path in PUBLIC_PATHS:
+        return None
+    provided = request.headers.get("X-Internal-Secret", "")
+    # Constant-time comparison avoids leaking the secret via timing.
+    if not provided or not hmac.compare_digest(provided, INTERNAL_SECRET):
+        return jsonify({
+            "error": "Forbidden: requests must originate from the trusted backend"
+        }), 403
 
+def internal_endpoint_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get("X-Internal-Secret", "")
+        if not auth_header or not hmac.compare_digest(auth_header, INTERNAL_SECRET):
+            return jsonify({"error": "Forbidden: requests must originate from the trusted backend"}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 BASE_DIR = Path(__file__).resolve().parent
 
 def resolve_path(env_var, default_filename):
@@ -107,6 +165,7 @@ app.label_encoder = label_encoder
 
 from bulk_predict import bulk_predict_bp
 app.register_blueprint(bulk_predict_bp)
+app.register_blueprint(analytics_bp)
 
 url_model = joblib.load(URL_MODEL_PATH)
 url_vectorizer = joblib.load(URL_VECTORIZER_PATH)
@@ -139,6 +198,10 @@ def heuristic_url_is_malicious(url):
     return tld in SUSPICIOUS_TLDS
 
 
+# Maximum number of characters accepted by the /predict endpoint. Anything
+# longer is rejected up front to avoid slow ML inference and memory spikes.
+MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", 10000))
+
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -159,19 +222,80 @@ def health():
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Request body must be a JSON object"}), 400
+
         text = data.get("text")
-        
+
         input_type = data.get("type", "message")
-        if not text:
+
+        # Reject missing/empty input.
+        if text is None or (isinstance(text, str) and not text.strip()):
             with open(LOG_FILE, "a") as f:
                 f.write(f"WARNING: No text provided at {__import__('datetime').datetime.now()}\n")
             return jsonify({"error": "No text provided"}), 400
+
+        # Strict type checking: the message field must be a string.
+        if not isinstance(text, str):
+            return jsonify({
+                "error": f"'text' must be a string, got {type(text).__name__}"
+            }), 400
+
+        # Maximum-length validation before any vectorization/inference work.
+        if len(text) > MAX_MESSAGE_LENGTH:
+            return jsonify({
+                "error": (
+                    f"'text' exceeds maximum length of {MAX_MESSAGE_LENGTH} "
+                    f"characters (got {len(text)})"
+                )
+            }), 400
+
+        # Translate incoming text to English if it is not in English
+        original_text = text
+        detected_language = "en"
+        translated = False
+        
+        # Reject whitespace-only input before it reaches the model: a blank
+        # string would otherwise be vectorized to an arbitrary, meaningless
+        # label. (Missing/empty text is already handled by the check above.)
+        if isinstance(text, str) and not text.strip():
+            return jsonify({"error": "No text provided"}), 400
+
+        if input_type != "url" and text.strip():
+            try:
+                from langdetect import detect, DetectorFactory
+                # langdetect is non-deterministic by default: the same text can
+                # be detected as different languages across calls, which would
+                # translate (or not) inconsistently and flip the final label.
+                # A fixed seed makes detection — and thus the prediction —
+                # reproducible for identical input.
+                DetectorFactory.seed = 0
+                detected_language = detect(text)
+            except Exception:
+                detected_language = "en"
+                
+            if detected_language != "en":
+                try:
+                    from deep_translator import GoogleTranslator
+                    translated_text = GoogleTranslator(source='auto', target='en').translate(text)
+                    if translated_text and translated_text.strip().lower() != text.strip().lower():
+                        text = translated_text
+                        translated = True
+                except Exception:
+                    pass
 
         # Get spam prediction
         text_vector = vectorizer.transform([text])
         prediction = model.predict(text_vector)
         final_output = label_encoder.inverse_transform(prediction)[0]
+
+        # Confidence using decision function for LinearSVC
+        try:
+            scores = model.decision_function(text_vector)
+            confidence = round(float(np.max(scores)), 4)
+        except Exception:
+            confidence = None
         
         # Get domain analysis
         domain_analysis = analyze_text(text)
@@ -231,31 +355,34 @@ def predict():
             for word in words:
                 spam_words_storage[word] = spam_words_storage.get(word, 0) + 1
 
+        # Record the scan now that the prediction label is known.
+        record_scan(text, final_output, input_type)
+
         # Log prediction
         text_preview = text[:50] + "..." if len(text) > 50 else text
         with open(LOG_FILE, "a") as f:
             from datetime import datetime
             f.write(f"{datetime.now()} - Prediction: '{text_preview}' -> {final_output}\n")
-        # feat
-            
-        # return jsonify({
-        #     "input": text, 
-        #     "prediction": final_output
-        # })
-    
-        # Return response with domain analysis
+        
+        # Generate XAI explanation for the input text
+        explanation = xai_engine.analyze(text, input_type=input_type)
 
-
-        # main
-        return jsonify({
-            "input": text,
+        # Return response with domain analysis and explanation
+        response_data = {
+            "input": original_text,
+            "result": final_output,
             "prediction": final_output,
-            "confidence": confidence,
-            "confidence_level": confidence_level,
-            "level_color": level_color,
-            "level_emoji": level_emoji,
-            "domain_analysis": domain_analysis
-        })
+            "domain_analysis": domain_analysis,
+            "explanation": explanation,
+            "detected_language": detected_language,
+            "translated": translated,
+        }
+        if translated:
+            response_data["translated_text"] = text
+        if confidence is not None:
+            response_data["confidence"] = confidence
+
+        return jsonify(response_data)
 
     except Exception as e:
         with open(LOG_FILE, "a") as f:
@@ -352,6 +479,7 @@ def get_feature_importance():
 
 
 @app.route("/feedback", methods=["POST"])
+@internal_endpoint_required
 def feedback():
     data = request.get_json(silent=True) or {}
 
@@ -362,16 +490,24 @@ def feedback():
     if not text or correct_label not in FEEDBACK_LABELS:
         return jsonify({"error": "Invalid feedback data"}), 400
 
-    file_exists = os.path.isfile(FEEDBACK_FILE)
-    with open(FEEDBACK_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["text", "predicted_label", "correct_label", "submitted_at"])
-        from datetime import datetime, timezone
-        writer.writerow([text, predicted_label, correct_label, datetime.now(timezone.utc).isoformat()])
+    lock_path = str(FEEDBACK_FILE) + '.lock'
 
-    return jsonify({"message": "Feedback recorded. Thank you!"}), 201
+    try:
+        with FileLock(lock_path, timeout=5):
+            file_exists = os.path.isfile(FEEDBACK_FILE)
+            with open(FEEDBACK_FILE, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(["text", "predicted_label", "correct_label", "submitted_at"])
+                from datetime import datetime, timezone
+                writer.writerow([text, predicted_label, correct_label, datetime.now(timezone.utc).isoformat()])
 
+        return jsonify({"message": "Feedback recorded. Thank you!"}), 201
+    except Timeout:
+        return jsonify({"error": "Could not acquire lock on feedback file, please try again later."}), 503
+    except Exception as e:
+        app.logger.error(f"Failed to write feedback: {e}")
+        return jsonify({"error": "Failed to record feedback."}), 500
 
 @app.route("/analyze-email-header", methods=["POST"])
 def analyze_email_header():
@@ -452,6 +588,7 @@ def gmail_callback():
         return jsonify({"error": f"Failed to exchange Google code: {str(e)}"}), 500
 
 @app.route("/gmail/emails", methods=["GET"])
+@internal_endpoint_required
 def gmail_emails():
     username = _require_username()
     if not username:
@@ -504,6 +641,7 @@ def outlook_callback():
         return jsonify({"error": f"Failed to exchange Outlook code: {str(e)}"}), 500
 
 @app.route("/outlook/emails", methods=["GET"])
+@internal_endpoint_required
 def outlook_emails():
     username = _require_username()
     if not username:
@@ -530,6 +668,7 @@ def outlook_emails():
         return jsonify({"error": f"Failed to fetch Outlook emails: {str(e)}"}), 500
 
 @app.route("/scan-emails", methods=["POST"])
+@internal_endpoint_required
 def scan_emails_route():
     data = request.get_json(silent=True) or {}
     provider = data.get("provider", "").lower()
@@ -615,9 +754,8 @@ def _require_username():
     """The Node gateway authenticates the user and forwards their identity via this
     header. We also verify the internal secret for security.
     """
-    secret = request.headers.get("X-Internal-Secret")
-    expected_secret = os.getenv("INTERNAL_SECRET", "super-secret-internal-key")
-    if not secret or secret != expected_secret:
+    secret = request.headers.get("X-Internal-Secret", "")
+    if not secret or not hmac.compare_digest(secret, INTERNAL_SECRET):
         return None
     username = request.headers.get("X-User-Username")
     if not username:
@@ -758,6 +896,28 @@ def imap_scan_results():
     return jsonify({"results": history, "page": page, "limit": limit})
 
 
+def _env_flag(name, default=False):
+    """Parse a boolean-ish environment variable (1/true/yes/on -> True)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 if __name__ == "__main__":
     FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
+    # Safe defaults: debug OFF and bind to localhost only. Both are opt-in via env.
+    FLASK_DEBUG = _env_flag("FLASK_DEBUG", default=False)
+    FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
+
+    # Exposing the Werkzeug debugger on a network-reachable interface allows
+    # arbitrary remote code execution, so refuse this unsafe combination.
+    if FLASK_DEBUG and FLASK_HOST not in ("127.0.0.1", "localhost", "::1"):
+        raise SystemExit(
+            "Refusing to start: FLASK_DEBUG is enabled while binding to "
+            f"'{FLASK_HOST}'. The interactive debugger must never be exposed on "
+            "a non-loopback interface. Set FLASK_HOST=127.0.0.1 or disable "
+            "FLASK_DEBUG."
+        )
+
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)

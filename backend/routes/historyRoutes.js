@@ -12,9 +12,6 @@ const { protect } = require("../middleware/authMiddleware");
 // Get logged-in user's history
 router.get("/", protect, getHistory);
 
-// Delete one history item
-router.delete("/:id", protect, deleteHistoryItem);
-
 // Bulk delete history items
 router.delete("/bulk-delete", protect, async (req, res) => {
   try {
@@ -39,12 +36,16 @@ router.delete("/bulk-delete", protect, async (req, res) => {
     });
 
   } catch (error) {
+    console.error("Bulk delete histoy error: ", error);
     res.status(500).json({ 
       success: false, 
-      message: error.message 
+      message: "Internal server error"
     });
   }
 });
+
+// Delete one history item
+router.delete("/:id", protect, deleteHistoryItem);
 
 // Clear all history
 router.delete("/", protect, clearHistory);

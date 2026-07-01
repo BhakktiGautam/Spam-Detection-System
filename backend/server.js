@@ -1,4 +1,4 @@
-const { formatError, errorHandler, errorCodes } = require('./utils/errorHelper');
+const { formatError, errorHandler, errorCodes, classifyMlApiError } = require('./utils/errorHelper');
 require("dotenv").config();
 const dns = require("dns");
 const validateEnv = require('./utils/validateEnv');
@@ -14,11 +14,23 @@ const { v4: uuidv4 } = require('uuid');
 const helmet = require('helmet');
 const axios = require("axios");
 
+// ===== STARTUP TIMER =====
+const SERVER_START_TIME = Date.now();
+const startupLogs = [];
+
+const logStartupTime= (component, startTime) => {
+  const elapsed = Date.now() - startTime;
+  startupLogs.push({ component, elapsed });
+    console.log(`⏱️ ${component} loaded in ${elapsed}ms`);
+};
+
 // Configure global request interceptor to append the internal secret API key
 axios.interceptors.request.use(
   (config) => {
-    const internalSecret = process.env.INTERNAL_SECRET || "super-secret-internal-key";
-    config.headers["X-Internal-Secret"] = internalSecret;
+    config.timeout = 15000; // 15 seconds timeout
+    // No hardcoded fallback: INTERNAL_SECRET is validated as mandatory at
+    // startup (see utils/validateEnv.js), so it is guaranteed present here.
+    config.headers["X-Internal-Secret"] = process.env.INTERNAL_SECRET;
     return config;
   },
   (error) => {
@@ -28,8 +40,11 @@ axios.interceptors.request.use(
 const mongoose = require("mongoose");
 
 const History = require("./models/History");
+const Rule = require("./models/Rule");
+const { matchKeywordRule } = require("./utils/keywordRules");
 
 const multer = require("multer");
+const displayBanner = require('./utils/banner');
 const upload = multer();
 const FormData = require("form-data");
 
@@ -37,20 +52,33 @@ const app = express();
 
 const Sentry = require("@sentry/node");
 
-Sentry.init({
-  dsn: process.env.SENTRY_DSN,
-  environment: process.env.NODE_ENV || "development",
-  tracesSampleRate: 1.0,
-  integrations: [
-    new Sentry.Integrations.Http({ tracing: true }),
-  ],
-});
+// ====== SENTRY SETUP ======
+let sentryEnabled = false;
 
-// Request handler - adds tracing context
-app.use(Sentry.Handlers.requestHandler());
-
-//Tracing handler - creates a trace for every incoming request
-app.use(Sentry.Handlers.tracingHandler());
+if (process.env.SENTRY_DSN && process.env.SENTRY_DSN !== 'https://your-sentry-dsn@o123456.ingest.sentry.io/1234567') {
+    const Sentry = require("@sentry/node");
+    Sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        environment: process.env.NODE_ENV || "development",
+        tracesSampleRate: 1.0,
+    });
+    app.use(Sentry.Handlers.requestHandler());
+    app.use(Sentry.Handlers.tracingHandler());
+    sentryEnabled = true;
+    console.log('✅ Sentry initialized');
+    
+    // Make Sentry available globally
+    global.Sentry = Sentry;
+} else {
+    console.log('ℹ️ Sentry disabled (no valid DSN provided)');
+    // Mock Sentry to prevent errors
+    global.Sentry = {
+        captureException: () => {},
+        setUser: () => {},
+        setTags: () => {},
+        setExtra: () => {},
+    };
+}
 
 // Connect to MongoDB WITH RETRY
 const connectWithRetry = async (retries=5, delay=5000) => {
@@ -61,6 +89,7 @@ const connectWithRetry = async (retries=5, delay=5000) => {
     try {
       await mongoose.connect(config.mongodbUri);
             console.log(`✅ MongoDB connected successfully (attempt ${attempt})`);
+            monitorConnectionPool();
             seedAdminUser();
             return true;
     } catch (err) {
@@ -83,16 +112,16 @@ const connectWithRetry = async (retries=5, delay=5000) => {
 
 //MONGODB CONNECTION POOL MONITORING
 const monitorConnectionPool = () => {
-  setInterval(() => {
+  const timer = setInterval(() => {
     try {
       const pool = mongoose.connection.client.topology.s.pool;
       if(pool) {
-        const size= pool.size||0;
-        const available= pool.availableConnections||0;
-        const used= pool.usedCount||0;
+        const size = pool.size || 0;
+        const available = pool.availableConnections || 0;
+        const used = pool.usedCount || 0;
         const usagePercent = size > 0 ? (used / size) * 100 : 0;
 
-        console.log(`[DB Pool] Size: ${size}, Available: ${available}, Used: ${used} (${usagePercent}%)`);
+        console.debug(`[DB Pool] Size: ${size}, Available: ${available}, Used: ${used} (${usagePercent}%)`);
 
         //Alert if usage exceeds 80%
         if(usagePercent > 80){
@@ -101,18 +130,12 @@ const monitorConnectionPool = () => {
       }
     } catch (err) {
     }
-  },3000); // every 3 seconds
+  }, 60000); // every 60 seconds
+
+  timer.unref(); // prevent this interval from blocking graceful shutdown
 };
 
-//Call after MONGODB connection is established
-mongoose
-    .connect(process.env.MONGODB_URI)
-    .then(() => {
-        console.log("✅ MongoDB connected");
-        monitorConnectionPool(); // 👈 Add this line
-        seedAdminUser();
-    })
-    .catch((err) => console.error("❌ MongoDB connection error:", err));
+
 
 
 if(process.env.NODE_ENV === 'development'){
@@ -140,13 +163,12 @@ if(process.env.NODE_ENV === 'development'){
 connectWithRetry();
 
 const corsOptions = {
-  origin: config.corsOrigins,
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 };
 app.use(cors(corsOptions));
 app.use(helmet());
 app.use(compression());
-app.use(express.json());
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use('/uploads', express.static('uploads'));
@@ -188,6 +210,7 @@ const authRoutes = require("./routes/authRoutes");
 const historyRoutes = require("./routes/historyRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const ruleRoutes = require("./routes/ruleRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 
 // Versioned routes (v1)
@@ -195,6 +218,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/history", historyRoutes);
 app.use("/api/v1/analytics", analyticsRoutes);
 app.use("/api/v1/chat", chatRoutes);
+app.use("/api/v1/rules", ruleRoutes);
 app.use("/api/v1/reports", reportRoutes);
 
 // Keep old routes for backward compatibility
@@ -202,10 +226,22 @@ app.use("/api/auth", authRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/rules", ruleRoutes);
 app.use("/api/reports", reportRoutes);
 
 const { protect } = require("./middleware/authMiddleware");
+const { predictLimiter } = require("./middleware/rateLimiter");
 
+// ===== PREDICTION COUNT =====
+app.get('/api/history/count',protect,async (req,res) => {
+  try{
+    const count = await History.countDocuments({user:req.user.id});
+    res.json({ success:true, count});
+  }catch(error){
+    console.error('Count error:',error.message);
+    res.status(500).json({success: false, error: error.message});
+  }
+  });
 app.get("/", (req, res) => {
   res.send("Node backend running ");
 });
@@ -226,11 +262,11 @@ app.get("/health", async (req, res) => {
 });
 
 // Protected: only authenticated users can predict
-app.post("/predict", protect, async (req, res) => {
+app.post("/predict", predictLimiter, protect, async (req, res) => {
   try {
     console.log("Reached /predict");
-    const { text, type } = req.body;
-    console.log("Received:", text, type);
+    const { text, type, sender } = req.body;
+    console.log("Received:", text, type, sender);
 
     // Check 1: fields must exist
     if (!text || !type) {
@@ -267,6 +303,97 @@ app.post("/predict", protect, async (req, res) => {
       });
     }
 
+    // Check Blacklist & Whitelist rules
+    let checkPattern = sender ? sender.trim().toLowerCase() : "";
+    if (!checkPattern && type.toLowerCase() === "email") {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (emailRegex.test(text.trim())) {
+        checkPattern = text.trim().toLowerCase();
+      }
+    }
+
+    if (checkPattern) {
+      const emailParts = checkPattern.split('@');
+      const domain = emailParts.length > 1 ? emailParts[1] : '';
+      const possiblePatterns = [checkPattern];
+      if (domain) {
+        possiblePatterns.push(`@${domain}`);
+        possiblePatterns.push(domain);
+      }
+
+      const rule = await Rule.findOne({
+        user: req.user.id,
+        ruleCategory: { $ne: 'keyword' },
+        pattern: { $in: possiblePatterns }
+      });
+
+      if (rule) {
+        const isSpam = rule.type === 'blacklist';
+        const prediction = isSpam ? "spam" : "ham";
+
+        // Save history for rule matches as well (best-effort)
+        try {
+          await History.create({
+            user: req.user.id,
+            query: text,
+            prediction: prediction,
+            type: type,
+            confidence: 1.0,
+          });
+        } catch (historyError) {
+          console.error("Failed to save history for rule match:", historyError.message);
+        }
+
+        console.log(`Rule match found (${rule.type}):`, checkPattern);
+        return res.json({
+          input: text,
+          prediction: prediction,
+          confidence: 1.0,
+          confidence_level: "high",
+          level_color: isSpam ? "red" : "green",
+          level_emoji: isSpam ? "🔴" : "🟢",
+          rule_applied: rule.type
+        });
+      }
+    }
+
+    // Check keyword/phrase rules against the message content before falling
+    // back to the ML model. A whitelisted phrase overrides a spam-looking
+    // message; a blacklisted phrase flags it as spam.
+    const keywordRules = await Rule.find({
+      user: req.user.id,
+      ruleCategory: 'keyword',
+    }).limit(1000).lean();
+
+    const keywordMatch = matchKeywordRule(text, keywordRules);
+    if (keywordMatch) {
+      const isSpam = keywordMatch.type === 'blacklist';
+      const prediction = isSpam ? "spam" : "ham";
+
+      try {
+        await History.create({
+          user: req.user.id,
+          query: text,
+          prediction: prediction,
+          type: type,
+          confidence: 1.0,
+        });
+      } catch (historyError) {
+        console.error("Failed to save history for keyword rule match:", historyError.message);
+      }
+
+      console.log(`Keyword rule match found (${keywordMatch.type}):`, keywordMatch.pattern);
+      return res.json({
+        input: text,
+        prediction: prediction,
+        confidence: 1.0,
+        confidence_level: "high",
+        level_color: isSpam ? "red" : "green",
+        level_emoji: isSpam ? "🔴" : "🟢",
+        rule_applied: keywordMatch.type,
+      });
+    }
+
     console.log("Calling Flask...");
 
     const response = await axios.post(
@@ -275,6 +402,10 @@ app.post("/predict", protect, async (req, res) => {
         text: text.trim(),
         type: type.toLowerCase(),
       },
+      {
+        headers: { "X-Forwarded-For": req.ip || req.connection.remoteAddress },
+        timeout: Number(process.env.ML_API_TIMEOUT_MS) || 15000,
+      }
     );
     console.log("Flask responded:", response.data);
 
@@ -288,17 +419,35 @@ app.post("/predict", protect, async (req, res) => {
         confidence: response.data.confidence,
       });
     } catch (historyError) {
-      console.error("Failed to save history:", historyError.message);
+
+      console.error(`[${req.requestId}] Failed to save history: ${historyError.message}`);
     }
 
     res.json(response.data);
   } catch (error) {
-    console.error(`[${req.requestId}]`,error.message);
-    res.status(500).json({ error: "Something went wrong" });
+Sentry.captureException(error, {
+      tags: {
+        endpoint: '/predict',
+        userId: req.user?.id || 'anonymous'
+      },
+      extra: {
+        text: req.body?.text?.substring(0, 100),
+        type: req.body?.type,
+        errorMessage: error.message
+      }
+    });
+
+    console.error(`[${req.requestId}]`, error.message);
+
+    // Distinguish ML API failures (timeout / unavailable / upstream 4xx vs 5xx)
+    // so the frontend can show specific messaging and a retry affordance.
+    const { status, body } = classifyMlApiError(error);
+    res.status(status).json(body);
   }
 });
 
-console.log("History saved");
+
+
 
 // Protected: record user feedback on a prediction (forwarded to the ML API)
 const ML_API_BASE = (
@@ -445,6 +594,17 @@ app.post("/bulk-predict", protect, upload.single("file"), async (req, res) => {
 
     res.json(response.data);
   } catch (error) {
+    //Capture error in Sentry 
+    Sentry.captureException(error, {
+      tags: {
+        endpoint: '/bulk-predict',
+        userId: req.user?.id || 'anonymous'
+      },
+      extra: {
+        fileSize: req.file?.size,
+        fileName: req.file?.originalname,
+      }
+    });
     if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
       console.error("Flask ML API is unavailable:", error.message);
       return res.status(503).json({
@@ -631,7 +791,8 @@ app.get("/gmail/callback", async (req, res) => {
     if (!code) {
       return res.status(400).json({ error: "Authorization code is missing" });
     }
-    res.redirect(`http://localhost:5173/app?provider=gmail&code=${code}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/app?provider=gmail&code=${code}`);
   } catch (error) {
     console.error(error.message);
     res.status(500).json({ error: "Something went wrong" });
@@ -666,6 +827,7 @@ app.get("/gmail/connect", protect, async (req, res) => {
     res.status(500).json({ error: "Something went wrong" });
   }
 });
+
 
 // Protected: Get latest Gmail emails
 app.get("/gmail/emails", protect, async (req, res) => {
@@ -725,7 +887,8 @@ app.get("/outlook/callback", async (req, res) => {
     if (!code) {
       return res.status(400).json({ error: "Authorization code is missing" });
     }
-    res.redirect(`http://localhost:5173/app?provider=outlook&code=${code}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/app?provider=outlook&code=${code}`);
   } catch (error) {
     console.error(error.message);
     res.status(500).json({ error: "Something went wrong" });
@@ -787,6 +950,103 @@ app.get("/outlook/emails", protect, async (req, res) => {
   }
 });
 
+// ========================================
+// PROTECTED ROUTES
+// ========================================
+// Helper: Apply user blacklist/whitelist rules to a list of emails
+async function applyRulesToEmails(userId, emails) {
+  if (!emails || !Array.isArray(emails) || emails.length === 0) {
+    return { emails: emails || [], spamCount: 0, safeCount: 0 };
+  }
+  
+  const rules = await Rule.find({ user: userId }).limit(1000).lean();
+  
+  const blacklist = new Set();
+  const whitelist = new Set();
+  
+  rules.forEach(r => {
+    if (!r.pattern) return;
+    const pattern = r.pattern.toLowerCase().trim();
+    if (r.type === 'blacklist') blacklist.add(pattern);
+    else if (r.type === 'whitelist') whitelist.add(pattern);
+  });
+  
+  let spamCount = 0;
+  let safeCount = 0;
+  
+  const modifiedEmails = emails.map(email => {
+    const sender = (email.sender || "").trim();
+    if (!sender) {
+      const isSpam = email.prediction && email.prediction.toLowerCase() !== 'ham' && email.prediction.toLowerCase() !== 'safe';
+      if (isSpam) spamCount++;
+      else safeCount++;
+      return email;
+    }
+    
+    // Parse sender (could be "John Doe <john@doe.com>" or just "john@doe.com")
+    let emailAddress = sender;
+    const emailMatch = sender.match(/<([^>]+)>/);
+    if (emailMatch) {
+      emailAddress = emailMatch[1];
+    }
+    emailAddress = emailAddress.toLowerCase().trim();
+    
+    const emailParts = emailAddress.split('@');
+    const domain = emailParts.length > 1 ? emailParts[1] : '';
+    
+    const possiblePatterns = [emailAddress];
+    if (domain) {
+      possiblePatterns.push(`@${domain}`);
+      possiblePatterns.push(domain);
+    }
+    
+    let matchedType = null;
+    for (const pattern of possiblePatterns) {
+      if (blacklist.has(pattern)) {
+        matchedType = 'blacklist';
+        break;
+      }
+      if (whitelist.has(pattern)) {
+        matchedType = 'whitelist';
+        break;
+      }
+    }
+    
+    if (matchedType) {
+      const isSpam = matchedType === 'blacklist';
+      const updatedPrediction = isSpam ? 'spam' : 'ham';
+      
+      if (updatedPrediction === 'spam') {
+        spamCount++;
+      } else {
+        safeCount++;
+      }
+      
+      return {
+        ...email,
+        prediction: updatedPrediction,
+        rule_applied: matchingRule.type
+      };
+    }
+    
+    // If no rule matches, keep original prediction
+    const isSpam = email.prediction && email.prediction.toLowerCase() !== 'ham' && email.prediction.toLowerCase() !== 'safe';
+    if (isSpam) {
+      spamCount++;
+    } else {
+      safeCount++;
+    }
+    
+    return email;
+  });
+  
+  return {
+    emails: modifiedEmails,
+    spamCount,
+    safeCount
+  };
+}
+
 // Protected: Scan connected emails
 app.post("/scan-emails", protect, async (req, res) => {
   try {
@@ -805,7 +1065,13 @@ app.post("/scan-emails", protect, async (req, res) => {
         },
       },
     );
-    res.json(response.data);
+    const ruleResults = await applyRulesToEmails(req.user.id, response.data.emails);
+    res.json({
+      ...response.data,
+      emails: ruleResults.emails,
+      spam_count: ruleResults.spamCount,
+      safe_count: ruleResults.safeCount
+    });
   } catch (error) {
     if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
       console.error("Flask ML API is unavailable:", error.message);
@@ -823,9 +1089,38 @@ app.post("/scan-emails", protect, async (req, res) => {
   }
 });
 
-const PORT = config.port;
+// Protected: IMAP connect
+app.post("/imap/connect", protect, async (req, res) => {
+  try {
+    const { email, password, host, port } = req.body;
+
+    if (!email || !password || !host) {
+      return res.status(400).json({
+        success: false,
+        error: "Email, password, and host are required"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "IMAP connection configured successfully",
+      data: { email, host, port: port || 993 }
+    });
+  } catch (error) {
+    console.error("IMAP connection error:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Failed to connect to IMAP server"
+    });
+  }
+});
+
+// ========================================
+// ERROR HANDLERS
+// ========================================
+
 app.use((err, req, res, next) => {
-  if(err.type==='entity.too.large' || err.message==='request entity too large') {
+  if (err.type === 'entity.too.large' || err.message === 'request entity too large') {
     return res.status(413).json({
       success: false,
       error: 'Payload too large. Please reduce the size of your request.',
@@ -834,29 +1129,84 @@ app.use((err, req, res, next) => {
   }
   next(err);
 });
+
 app.use(errorHandler);
-// ====== START SERVER ======
-// Protected: connect a read-only IMAP inbox for scheduled scanning
-app.post("/imap/connect", protect, async (req, res) => {
-  try {
-    const response = await axios.post(`${ML_API_BASE}/imap/connect`, req.body, {
-      headers: { "X-User-Username": req.user.username },
-    });
-    res.json(response.data);
-  } catch (error) {
-    if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-      console.error("Flask ML API is unavailable:", error.message);
-      return res.status(503).json({
-        error: "Flask ML API is currently unavailable. Please try again later.",
-      });
-    }
-    if (error.response) {
-      return res.status(error.response.status).json(error.response.data);
-    }
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
+
+// ========================================
+// START SERVER
+// ========================================
+
+const PORT = config.port;
+const server = app.listen(PORT, () => {
+  displayBanner();
+  const totalTime = Date.now() - SERVER_START_TIME;
+  console.log(`⏱️ Total startup time: ${totalTime}ms`);
 });
+
+// ====== PREDICTION STATISTICS ======
+app.get('/api/stats', protect, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const total = await History.countDocuments({ user: userId });
+        const spam = await History.countDocuments({ user: userId, prediction: 'spam' });
+        const ham = await History.countDocuments({ user: userId, prediction: 'ham' });
+        
+        const daily = await History.aggregate([
+            { $match: { user: userId } },
+            { $group: { 
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, 
+                count: { $sum: 1 } 
+            }},
+            { $sort: { _id: -1 } },
+            { $limit: 7 }
+        ]);
+        
+        const feedbackCount = await History.countDocuments({ 
+            user: userId, 
+            feedback: { $exists: true } 
+        });
+        
+        res.json({
+            success: true,
+            data: {
+                total,
+                spam,
+                ham,
+                spamRatio: total > 0 ? (spam / total) * 100 : 0,
+                daily,
+                feedbackCount
+            }
+        });
+    } catch (error) {
+        console.error('Stats error:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ========================================
+// GRACEFUL SHUTDOWN
+// ========================================
+
+const gracefulShutdown = async (signal) => {
+  console.log(`\nReceived ${signal}. Closing server...`);
+  server.close(async () => {
+    console.log('HTTP server closed.');
+    try {
+      await mongoose.disconnect();
+      console.log('MongoDB connection closed.');
+    } catch (err) {
+      console.error('Error closing MongoDB connection:', err);
+    }
+    console.log('Shutdown complete. Exiting process.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Protected: get the current IMAP connection status for the logged-in user
 app.get("/imap/status", protect, async (req, res) => {
@@ -934,7 +1284,13 @@ app.post("/imap/scan-now", protect, async (req, res) => {
       {},
       { headers: { "X-User-Username": req.user.username } },
     );
-    res.json(response.data);
+    const ruleResults = await applyRulesToEmails(req.user.id, response.data.emails);
+    res.json({
+      ...response.data,
+      emails: ruleResults.emails,
+      spam_count: ruleResults.spamCount,
+      safe_count: ruleResults.safeCount
+    });
   } catch (error) {
     if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
       console.error("Flask ML API is unavailable:", error.message);
@@ -958,7 +1314,11 @@ app.get("/imap/scan-results", protect, async (req, res) => {
       params: req.query,
       headers: { "X-User-Username": req.user.username },
     });
-    res.json(response.data);
+    const ruleResults = await applyRulesToEmails(req.user.id, response.data.results);
+    res.json({
+      ...response.data,
+      results: ruleResults.emails
+    });
   } catch (error) {
     if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
       console.error("Flask ML API is unavailable:", error.message);
@@ -974,33 +1334,55 @@ app.get("/imap/scan-results", protect, async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// ===== SEARCH HISTORY =====
+app.get('/api/history/search',protect, async(req,res) => {
+  try{
+    const{q,type,startDate,endDate} = req.query;
+    const query = { user: req.user.id};
+
+    // Search by message text
+    if(q && q.trim()){
+           query.query = { $regex: q.trim(), $options: 'i' };
+        }
+
+        // Filter by prediction type
+        if (type && type !== 'all') {
+            query.prediction = type;
+        }
+
+        // Filter by date range
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) {
+                query.createdAt.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                query.createdAt.$lte = new Date(endDate);
+            }
+        }
+
+        const results = await History.find(query)
+            .sort({ createdAt: -1 })
+            .limit(100);
+
+        const total = await History.countDocuments(query);
+
+        res.json({
+            success: true,
+            data: results,
+            total,
+            count: results.length
+        });
+    } catch (error) {
+        console.error('Search error:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
-
-// ===== GRACEFUL SHUTDOWN =====
-const gracefulShutdown = async signal => {
-  console.log(`\nReceived ${signal}. Closing server...`);
-
-  //Stop accepting new requests
-  server.close(async () => {
-    console.log('HTTP server closed.');
-  });
-
-  //Close DB connection
-  try {
-    await mongoose.disconnect();
-    console.log('MongoDB connection closed.');
-  } catch (err) {
-    console.error('Error closing MongoDB connection:', err);
-  }
-
-  console.log('Shutdown complete. Exiting process.');
-  process.exit(0);
-}
-
-// Listen for termination signals
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+module.exports = { app, applyRulesToEmails };
  
