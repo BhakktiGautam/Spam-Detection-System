@@ -13,6 +13,7 @@ const compression = require('compression');
 const { v4: uuidv4 } = require('uuid');
 const helmet = require('helmet');
 const axios = require("axios");
+const { preventCacheStampede } = require('./middleware/cacheMiddleware');
 
 // ===== STARTUP TIMER =====
 const SERVER_START_TIME = Date.now();
@@ -258,7 +259,8 @@ app.get("/health", async (req, res) => {
 });
 
 // Protected: only authenticated users can predict
-app.post("/predict", protect, async (req, res) => {
+
+app.post('/predict', preventCacheStampede, protect, async (req, res) => {
   try {
     console.log("Reached /predict");
     const { text, type, sender } = req.body;
@@ -1324,9 +1326,7 @@ app.get('/api/history/search',protect, async(req,res) => {
 //   displayBanner();
 //   console.log(`⏱️ Total startup time: ${totalTime}ms`);
 // });
-// Listen for termination signals
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 
 module.exports = { app, applyRulesToEmails };
  
