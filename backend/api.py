@@ -19,7 +19,8 @@ from filelock import FileLock
 import requests
 from routes.analytics import analytics_bp
 from routes.analytics import record_scan
-from flask_limiter import Limiter, RateLimitExceeded
+from flask_limiter import Limiter
+from flask_limiter.errors import RateLimitExceeded
 from flask_limiter.util import get_remote_address
 
 
