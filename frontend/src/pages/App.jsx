@@ -37,7 +37,7 @@ function App() {
   const [wordOfDay, setWordOfDay] = useState(null);
   const [wordLoading, setWordLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const[SpamPatternLibrary, setSpamPatternLibrary] = useState(false);
+  const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const [hasCelebrated, setHasCelebrated] = useState(() => {
     return localStorage.getItem("firstPrediction") === "true";
   });
