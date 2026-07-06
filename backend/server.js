@@ -426,7 +426,10 @@ app.post(
         const ruleResult = {
           input: text,
           prediction: prediction,
+          result: prediction,
           confidence: 1.0,
+          confidence_score: 100.0,
+          decision_score: null,
           confidence_level: "high",
           level_color: isSpam ? "red" : "green",
           level_emoji: isSpam ? "🔴" : "🟢",
@@ -466,7 +469,10 @@ app.post(
       const kwResult = {
         input: text,
         prediction: prediction,
+        result: prediction,
         confidence: 1.0,
+        confidence_score: 100.0,
+        decision_score: null,
         confidence_level: "high",
         level_color: isSpam ? "red" : "green",
         level_emoji: isSpam ? "🔴" : "🟢",

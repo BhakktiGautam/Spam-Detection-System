@@ -33,6 +33,7 @@ def parse_and_predict_file(file):
 
     # Helper for batch inference
     def _batch_predict(batch_messages):
+        import numpy as np
         vectorizer = getattr(current_app, "vectorizer", None)
         model = getattr(current_app, "model", None)
         label_encoder = getattr(current_app, "label_encoder", None)
@@ -41,9 +42,33 @@ def parse_and_predict_file(file):
         text_vectors = vectorizer.transform(batch_messages)
         predictions = model.predict(text_vectors)
         final_outputs = label_encoder.inverse_transform(predictions)
+        
+        # Compute decisions
+        decisions = model.decision_function(text_vectors)
+        
         batch_results = []
-        for msg, pred in zip(batch_messages, final_outputs):
-            batch_results.append({"message": msg, "prediction": str(pred)})
+        for i, (msg, pred) in enumerate(zip(batch_messages, final_outputs)):
+            pred_str = str(pred)
+            dec_score = float(np.max(np.abs(decisions[i])))
+            prob = 1.0 / (1.0 + np.exp(-dec_score))
+            conf_score = round(prob * 100, 2)
+            
+            if conf_score >= 80:
+                conf_level = "high"
+            elif conf_score >= 60:
+                conf_level = "medium"
+            else:
+                conf_level = "low"
+                
+            batch_results.append({
+                "message": msg,
+                "prediction": pred_str,
+                "result": pred_str,
+                "confidence": round(conf_score / 100.0, 4),
+                "confidence_score": conf_score,
+                "decision_score": dec_score,
+                "confidence_level": conf_level
+            })
         return batch_results
 
     BATCH_SIZE = int(os.getenv("BULK_PREDICT_BATCH_SIZE", "256"))
@@ -134,9 +159,9 @@ def bulk_predict_export():
     try:
         output_io = io.StringIO()
         writer = csv.writer(output_io)
-        writer.writerow(["message", "prediction"])
+        writer.writerow(["message", "prediction", "result", "confidence_score", "decision_score", "confidence_level"])
         for r in results:
-            writer.writerow([r["message"], r["prediction"]])
+            writer.writerow([r["message"], r["prediction"], r["result"], r["confidence_score"], r["decision_score"], r["confidence_level"]])
             
         output_io.seek(0)
         mem = io.BytesIO(output_io.getvalue().encode("utf-8"))
