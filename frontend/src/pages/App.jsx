@@ -5,6 +5,7 @@ import { useTheme } from "../context/ThemeContext";
 import api from "../utils/axiosInstance";
 import "../App.css";
 import FeatureImportance from "../components/FeatureImportance";
+import PredictionExplanation from '../components/PredictionExplanation';
 import PredictionExplanation from "../components/PredictionExplanation";
 import History from "../components/History";
 import WordCloud from "../components/WordCloud";
@@ -33,6 +34,7 @@ function App() {
   const [confidence, setConfidence] = useState(null);
   const [explanation, setExplanation] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [explanation, setExplanation] = useState(null);
   const [type, setType] = useState("message");
   const [errorInfo, setErrorInfo] = useState(null);
   const [wordOfDay, setWordOfDay] = useState(null);
@@ -316,6 +318,7 @@ const analyzeEmojiSentiment = (text) => {
       }
       setResult(res.data.prediction);
       setConfidence(res.data.confidence ?? null);
+      setExplanation(res.data.explanation || null);
       setErrorInfo(null);
     } catch (error) {
       console.error('API Error:', error);
@@ -752,6 +755,14 @@ const analyzeEmojiSentiment = (text) => {
                        {text}
                       </span>
                     </URLPreview>
+
+                    {explanation && result !== "Error" && (
+                    <PredictionExplanation 
+                      explanation={explanation} 
+                      result={result} 
+                      darkMode={isDark} 
+                     />
+                    )}
 
                     {confidence !== null && result !== "Error" && (
                       <>
