@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import numpy as np
 from flask import Blueprint, request, jsonify, current_app, send_file
 
 bulk_predict_bp = Blueprint("bulk_predict", __name__)
@@ -33,7 +34,6 @@ def parse_and_predict_file(file):
 
     # Helper for batch inference
     def _batch_predict(batch_messages):
-        import numpy as np
         vectorizer = getattr(current_app, "vectorizer", None)
         model = getattr(current_app, "model", None)
         label_encoder = getattr(current_app, "label_encoder", None)
