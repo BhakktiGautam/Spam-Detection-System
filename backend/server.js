@@ -1,6 +1,10 @@
 const { checkCache, setCache } = require('./middleware/cacheMiddleware');
 const { formatError, errorHandler, errorCodes, classifyMlApiError } = require('./utils/errorHelper');
 require("dotenv").config();
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
 const dns = require("dns");
 const validateEnv = require('./utils/validateEnv');
 validateEnv(); // Validate environment variables
@@ -252,23 +256,6 @@ app.get("/", (req, res) => {
 });
 
 
-
-// ========================================
-// ERROR HANDLERS
-// ========================================
-
-app.use((err, req, res, next) => {
-  if (err.type === 'entity.too.large' || err.message === 'request entity too large') {
-    return res.status(413).json({
-      success: false,
-      error: 'Payload too large. Please reduce the size of your request.',
-      message: 'Request size exceeds 1MB limit.',
-    });
-  }
-  next(err);
-});
-
-app.use(errorHandler);
 
 // ========================================
 // START SERVER
