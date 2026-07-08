@@ -212,9 +212,10 @@ const bulkDeleteHistory = async (req, res) => {
 };
 
 // Get history count
-const  getHistoryCount = async (req, res) => {
+const getHistoryCount = async (req, res) => {
   try {
-    const count = await History.countDocuments({ user: req.user.id });
+    const safeUserId = getSafeUserId(req);
+    const count = await History.countDocuments({ user: safeUserId });
     res.json({ success: true, count });
   } catch (error) {
     console.error('Count error:', error.message);
@@ -228,5 +229,5 @@ module.exports = {
   deleteHistoryItem,
   clearHistory,
   bulkDeleteHistory,
- getHistoryCount
+  getHistoryCount
 };
