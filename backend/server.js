@@ -719,6 +719,40 @@ app.get("/spam-insights", protect, async (req, res) => {
   }
 });
 
+app.get('/api/predictions/stats', async (req, res) => {
+  try {
+    // Get user ID from auth token
+    const userId = req.user.id;
+    
+    // Get today's start date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Query predictions from database
+    const predictions = await db.predictions.findMany({
+      where: {
+        userId: userId,
+      },
+      select: {
+        createdAt: true,
+      },
+    });
+    
+    // Calculate stats
+    const total = predictions.length;
+    const todayCount = predictions.filter(p => 
+      new Date(p.createdAt) >= today
+    ).length;
+    
+    res.json({
+      today: todayCount,
+      total: total,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
 // Public: word frequency data for the spam word-cloud widget (forwarded to ML API)
 app.get("/api/wordcloud", async (req, res) => {
   try {
