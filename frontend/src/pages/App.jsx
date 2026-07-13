@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEffect } from 'react';
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import api from "../utils/axiosInstance";
@@ -73,6 +74,20 @@ function SpamDetector() {
     }
   };
 
+function App() {
+  const [showButton, setShowButton] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowButton(window.scrollY > 300);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const getColor = () => {
     if (result === "ham" || result === "safe")
       return "text-green-600 dark:text-green-400";
@@ -529,6 +544,7 @@ function SpamDetector() {
               >
                 Reset
               </button>
+
 
               <FeatureImportance darkMode={isDark} />
             </>
