@@ -7,16 +7,36 @@ const DATE_FORMATS = {
   monthly: "%Y-%m",
 };
 
+const ANALYTICS_RANGES = Object.keys(DATE_FORMATS);
+
 // Labels the ML API returns for a clean verdict (text -> "ham", url -> "safe").
 // Everything else ("spam", "smishing", "malicious", "offensive", ...) counts as a threat.
 const CLEAN_LABELS = new Set(["ham", "safe"]);
 
 const pct = (count, total) => (total ? Number(((count / total) * 100).toFixed(2)) : 0);
 
+const getUserObjectId = (req) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    const error = new Error("Authentication required");
+    error.status = 401;
+    throw error;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    const error = new Error("Invalid authenticated user id");
+    error.status = 400;
+    throw error;
+  }
+
+  return new mongoose.Types.ObjectId(userId);
+};
+
 // GET /analytics/summary
 const getSummary = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = getUserObjectId(req);
     const counts = await History.aggregate([
       { $match: { user: userId } },
       { $group: { _id: "$prediction", count: { $sum: 1 } } },
@@ -46,18 +66,20 @@ const getSummary = async (req, res) => {
     });
   } catch (err) {
     console.error("Analytics summary error:", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(err.status || 500).json({
+      error: err.message || "Server error",
+    });
   }
 };
 
 // GET /analytics/trends?range=daily|weekly|monthly
 const getTrends = async (req, res) => {
   try {
-    const range = ["daily", "weekly", "monthly"].includes(req.query.range)
+    const range = ANALYTICS_RANGES.includes(req.query.range)
       ? req.query.range
       : "daily";
 
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = getUserObjectId(req);
     const trends = await History.aggregate([
       { $match: { user: userId } },
       {
@@ -88,7 +110,7 @@ const getTrends = async (req, res) => {
 // GET /analytics/breakdown
 const getBreakdown = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const userId = getUserObjectId(req);
     const breakdown = await History.aggregate([
       { $match: { user: userId } },
       {
@@ -112,8 +134,43 @@ const getBreakdown = async (req, res) => {
   }
 };
 
+// GET /analytics/me
+const getPersonalSummary = async (req, res) => {
+  try {
+    const userId = getUserObjectId(req);
+    const stats = await History.aggregate([
+      { $match: { user: userId } },
+      {
+        $group: {
+          _id: null,
+          total_predictions: { $sum: 1 },
+          spam_count: { $sum: { $cond: [{ $eq: ["$prediction", "spam"] }, 1, 0] } },
+          ham_count: { $sum: { $cond: [{ $in: ["$prediction", ["ham", "safe"]] }, 1, 0] } },
+          smishing_count: { $sum: { $cond: [{ $eq: ["$prediction", "smishing"] }, 1, 0] } },
+          most_recent: { $max: "$createdAt" },
+        },
+      },
+    ]);
+
+    const result = stats[0] || {
+      total_predictions: 0,
+      spam_count: 0,
+      ham_count: 0,
+      smishing_count: 0,
+      most_recent: null,
+    };
+
+    res.json(result);
+  } catch (err) {
+    console.error("Personal analytics error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 module.exports = {
   getSummary,
   getTrends,
   getBreakdown,
+  getPersonalSummary,
 };
+
