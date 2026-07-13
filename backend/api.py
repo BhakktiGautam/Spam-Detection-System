@@ -649,7 +649,18 @@ def predict():
 
 
     try:
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        if data is None:
+            if request.get_data(cache=True):
+                return jsonify({
+                    "error": "Request body must be a valid JSON object"
+                }), 400
+            data = {}
+        elif not isinstance(data, dict):
+            return jsonify({
+                "error": f"Request body must be a JSON object, got {type(data).__name__}"
+            }), 400
+
         text = data.get("text")
         input_type = data.get("type", "message")
 
