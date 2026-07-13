@@ -10,6 +10,9 @@ module.exports = [
       globals: {
         ...globals.node,
         ...globals.jest,
+        // Set on `global` by server.js's Sentry setup before route modules
+        // are required; real at runtime, just invisible to static analysis.
+        Sentry: 'readonly',
       },
     },
     rules: {
