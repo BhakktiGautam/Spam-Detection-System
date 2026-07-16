@@ -31,12 +31,7 @@ pytesseract>=0.3.10
 opencv-python>=4.8.0
 Pillow>=9.0.0
 html2image>=2.0.0
-<<<<<<< Updated upstream
 
-=======
-=======
->>>>>>> 42c19e1f454b08381ffc8132bf9ae9f6a57dabda
->>>>>>> Stashed changes
 scikit-learn>=1.2.0
 pandas>=1.5.0
 numpy>=1.23.0
@@ -50,4 +45,8 @@ html2image>=2.0.0
 
 numpy>=1.23.0
 filelock
+numpy>=1.23.0
+Pillow>=9.0.0
+scikit-learn>=1.2.0
+opencv-python>=4.8.0
 
