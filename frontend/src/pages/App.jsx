@@ -20,7 +20,11 @@ import Skeleton from 'react-loading-skeleton';
 import 'react-loading-skeleton/dist/skeleton.css';
 import EmailHeaderAnalyzer from "../components/EmailHeaderAnalyzer";
 import BulkSpamDetection from "../components/BulkSpamDetection";
+<<<<<<< Updated upstream
 import { ResultBadge } from '../components/ResultBadge';
+=======
+import { ResultBadge } from './components/ResultBadge';
+>>>>>>> Stashed changes
 import SpamInsightsDashboard from "../components/SpamInsightsDashboard";
 import EmailScannerDashboard from "../components/EmailScannerDashboard";
 import Chatbot from "../components/Chatbot";
@@ -47,7 +51,10 @@ function App() {
   const [lastCall, setLastCall] = useState(0);
   const [rateLimitError, setRateLimitError] = useState('');
   const [copied, setCopied] = useState(false);
+<<<<<<< Updated upstream
   // eslint-disable-next-line no-unused-vars
+=======
+>>>>>>> Stashed changes
   const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const [hasCelebrated, setHasCelebrated] = useState(() => {
     return localStorage.getItem("firstPrediction") === "true";
@@ -107,21 +114,30 @@ function App() {
   };
 
   // Helper to get earned badges (returns array of badge objects)
+<<<<<<< Updated upstream
   // eslint-disable-next-line no-unused-vars
+=======
+>>>>>>> Stashed changes
   const getEarnedBadges = () => {
     try {
       const streakCount = parseInt(localStorage.getItem('predictionStreak') || '0', 10);
       return Object.keys(Badges)
         .map((k) => ({ day: Number(k), ...Badges[k] }))
         .filter((b) => streakCount >= b.day);
+<<<<<<< Updated upstream
   // eslint-disable-next-line no-unused-vars
+=======
+>>>>>>> Stashed changes
     } catch (e) {
       return [];
     }
   };
 
   // Placeholder for badge checking logic
+<<<<<<< Updated upstream
   // eslint-disable-next-line no-unused-vars
+=======
+>>>>>>> Stashed changes
   const checkNewBadge = (newStreak) => {
     // simple implementation: if new streak matches a badge threshold, show popup
     if (Badges[newStreak]) {
@@ -371,9 +387,13 @@ const analyzeEmojiSentiment = (text) => {
       }
       setResult(res.data.prediction);
       setConfidence(res.data.confidence ?? null);
+<<<<<<< Updated upstream
       setSeverity(res.data.severity || null);
       setExplanation(res.data.explanation || null);
       setUrlRisk(res.data.url_risk || null);
+=======
+      setExplanation(res.data.explanation || null);
+>>>>>>> Stashed changes
       setErrorInfo(null);
     } catch (error) {
       console.error('API Error:', error);
@@ -1014,7 +1034,10 @@ const analyzeEmojiSentiment = (text) => {
                       setResult("");
                       setConfidence(null);
                       setExplanation(null);
+<<<<<<< Updated upstream
                       setUrlRisk(null);
+=======
+>>>>>>> Stashed changes
                       setErrorInfo(null);
                       setCopied(false);
                       setType("message");
@@ -1041,6 +1064,7 @@ const analyzeEmojiSentiment = (text) => {
                 <FeatureImportance darkMode={isDark} />
                 <CensorshipMode text={text} darkMode={isDark} />
 
+<<<<<<< Updated upstream
                   {wordOfDay && (
   <div className={`mt-6 p-4 rounded-xl border ${isDark ? 'bg-slate-800/30 border-slate-700' : 'bg-white/40 border-slate-200'}`}>
     <div className="flex items-center justify-between mb-2">
@@ -1062,6 +1086,119 @@ const analyzeEmojiSentiment = (text) => {
               {wordOfDay.count} {wordOfDay.count === 1 ? 'detection' : 'detections'}
             </span>
           )}
+=======
+                {/* SPAM WORD OF THE DAY */}
+                {wordOfDay && (
+                  <div className={`mt-6 p-4 rounded-xl border ${isDark ? 'bg-slate-800/30 border-slate-700' : 'bg-white/40 border-slate-200'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold opacity-70">📚 Spam Word of the Day</h3>
+                      <button onClick={fetchWordOfTheDay} className="text-xs opacity-50 hover:opacity-100 transition-opacity" title="Refresh word of the day">
+                        🔄
+                      </button>
+                    </div>
+                    {wordLoading ? (
+                      <div className="h-8 w-48 bg-slate-300 rounded animate-pulse"></div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <span className={`text-2xl font-bold ${isDark ? 'text-yellow-400' : 'text-yellow-600'}`}>
+                            {wordOfDay.word || 'No spam detected today'}
+                          </span>
+                          {wordOfDay.count && (
+                            <span className="text-sm opacity-60">
+                              {wordOfDay.count} {wordOfDay.count === 1 ? 'detection' : 'detections'}
+                            </span>
+                          )}
+                        </div>
+                        {wordOfDay.definition && (
+                          <p className="text-sm mt-2 opacity-75 leading-relaxed">{wordOfDay.definition}</p>
+                        )}
+                        {wordOfDay.context && (
+                          <div className={`mt-2 p-2 rounded text-xs ${isDark ? 'bg-slate-900/50' : 'bg-slate-100/50'}`}>
+                            <span className="opacity-60">Example: </span>
+                            <span className="italic">"{wordOfDay.context}"</span>
+                          </div>
+                        )}
+                        {wordOfDay.tips && (
+                          <div className={`mt-2 p-2 rounded text-xs ${isDark ? 'bg-blue-900/20' : 'bg-blue-50'}`}>
+                            💡 {wordOfDay.tips}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-6 p-4 rounded-xl border text-left">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold opacity-70">📈 Spam Detection Insights</span>
+                    <div className="flex items-center gap-2">
+                      {getEarnedBadges().map((badge) => (
+                        <span key={badge.day} className="text-lg" title={badge.name}>
+                          {badge.icon}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <WordCloud darkMode={isDark} />
+              </>
+            ) : activeTab === "bulk" ? (
+              <BulkSpamDetection />
+            ) : activeTab === "insights" ? (
+              <SpamInsightsDashboard />
+            ) : activeTab === "scanner" ? (
+              <EmailScannerDashboard />
+            ) : activeTab === "rules" ? (
+              <RulesManager />
+            ) : activeTab === "history" ? (
+              <History />
+            ) : (
+              <EmailHeaderAnalyzer />
+            )}
+
+            {showCelebration && (
+              <div className="celebration-modal" style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.6)',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 1000
+              }}>
+                <div style={{
+                  background: 'white',
+                  padding: '40px',
+                  borderRadius: '20px',
+                  textAlign: 'center',
+                  maxWidth: '400px',
+                  width: '90%'
+                }}>
+                  <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
+                  <h2 style={{ color: '#7c3aed' }}>First Prediction Complete!</h2>
+                  <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+                    You're on your way to becoming a spam detection expert!
+                  </p>
+                  <button
+                    onClick={() => setShowCelebration(false)}
+                    style={{
+                      padding: '10px 30px',
+                      background: '#7c3aed',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Continue Learning →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+>>>>>>> Stashed changes
         </div>
         {wordOfDay.definition && (
           <p className="text-sm mt-2 opacity-75 leading-relaxed">{wordOfDay.definition}</p>

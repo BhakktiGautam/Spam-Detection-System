@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+<<<<<<< Updated upstream
 
 
 import numpy as np
@@ -8,9 +9,21 @@ import numpy as np
 from flask import Blueprint, current_app, jsonify, request, send_file
 
 from extensions import limiter
+=======
+>>>>>>> Stashed changes
+
+
+<<<<<<< Updated upstream
+=======
+import numpy as np
+
+from flask import Blueprint, current_app, jsonify, request, send_file
+
+from api import limiter
 
 bulk_predict_bp = Blueprint("bulk_predict", __name__)
 
+>>>>>>> Stashed changes
 def parse_and_predict_file(file):
     # Check file extension
     filename = file.filename.lower() if file.filename else ""
