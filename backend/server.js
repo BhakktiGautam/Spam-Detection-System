@@ -22,7 +22,9 @@ app.use('/api/adversarial', adversarialRoutes);
 // ===== STARTUP TIMER =====
 const SERVER_START_TIME = Date.now();
 const startupLogs = [];
-
+// Add Poisoning Defense routes
+const poisoningRoutes = require('./routes/poisoningRoutes');
+app.use('/api/poisoning', poisoningRoutes);
 const logStartupTime= (component, startTime) => {
   const elapsed = Date.now() - startTime;
   startupLogs.push({ component, elapsed });
