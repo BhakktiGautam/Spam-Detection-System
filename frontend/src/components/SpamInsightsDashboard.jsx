@@ -3,6 +3,7 @@ import { useTheme } from "../context/ThemeContext";
 import api from "../utils/axiosInstance";
 import { SpamTrends } from './SpamTrends';
 import { RecentActivity } from './RecentActivity';
+import { RateLimitDashboard } from './RateLimitDashboard';
 
 
 export default function SpamInsightsDashboard() {
@@ -193,6 +194,11 @@ export default function SpamInsightsDashboard() {
           <div className="dashboard-section">
              <RecentActivity />
           </div>
+
+          <div className="dashboard-section">
+             <RateLimitDashboard />
+          </div>
+
 
 
           {/* Recent Suspicious Terms */}

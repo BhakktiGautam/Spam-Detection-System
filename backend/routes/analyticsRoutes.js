@@ -55,5 +55,25 @@ router.get('/trends', protect, async (req, res) => {
   }
 });
 
+router.get('/rate-limit', protect, async (req, res) => {
+  try {
+    const key = `rate_limit:${req.user.id}`;
+    const current = await cache.get(key) || 0;
+    const limit = 100;
+    const remaining = Math.max(0, limit - current);
+    
+    res.json({
+      limit,
+      used: current,
+      remaining,
+      percentage: Math.round((current / limit) * 100),
+      reset: new Date(Date.now() + 3600 * 1000).toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch rate limit' });
+  }
+});
+
+
 module.exports = router;
       
