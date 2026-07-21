@@ -350,9 +350,6 @@ const analyzeEmojiSentiment = (text) => {
     fetchWordOfTheDay();
   }, []);
 
-  // ============================================
-  // MAIN PREDICT FUNCTION
-  // ============================================
   const handlePredict = async () => {
     if (!text || text.trim().length === 0) return;
     const now = Date.now();
@@ -427,12 +424,38 @@ const analyzeEmojiSentiment = (text) => {
   };
 
   // ============================================
-  // ✅ HANDLE ENTER KEY (NEW - Issue #946)
+  // ✅ HANDLE CLEAR BUTTON (Issue #948)
+  // ============================================
+  const handleClear = () => {
+    // Clear text input
+    setText("");
+    
+    // Clear all results
+    setResult("");
+    setHistoryId(null);
+    setConfidence(null);
+    setSeverity(null);
+    setExplanation(null);
+    setUrlRisk(null);
+    setErrorInfo(null);
+    setRateLimitError('');
+    setCopied(false);
+    setType("message");
+    setShowDeSpamify(false);
+    
+    // Clear DeSpamify text if shown
+    if (document.querySelector('.de-spamify-result')) {
+      const deSpamifyText = document.querySelector('.de-spamify-result');
+      if (deSpamifyText) deSpamifyText.textContent = '';
+    }
+  };
+
+  // ============================================
+  // ✅ HANDLE ENTER KEY (Issue #946)
   // ============================================
   const handleKeyDown = (e) => {
-    // Check if Enter key is pressed and not Shift+Enter (for multi-line)
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault(); // Prevent newline in textarea
+      e.preventDefault();
       if (!loading && text.trim().length > 0 && text.length <= 5000) {
         handlePredict();
       }
@@ -491,6 +514,9 @@ const analyzeEmojiSentiment = (text) => {
   const severityTone = severity?.level === "Critical" ? "text-red-600 dark:text-red-400" : severity?.level === "High" ? "text-orange-600 dark:text-orange-400" : severity?.level === "Moderate" ? "text-yellow-700 dark:text-yellow-400" : "text-green-700 dark:text-green-400";
   const emojiAnalysis = useMemo(() => analyzeEmojiSentiment(text), [text]);
 
+  // Check if clear button should be shown
+  const showClearButton = text.length > 0 || result !== "" || errorInfo !== null || rateLimitError !== "";
+
   return (
     <div className={`min-h-screen flex flex-col items-center px-4 py-8 pb-32 transition-all duration-500 ${isDark ? activeTheme.dark : activeTheme.light}`}>
       {/* Top Controls */}
@@ -508,7 +534,6 @@ const analyzeEmojiSentiment = (text) => {
         >
           {isDark ? '☀️' : '🌙'}
         </button>
-        <InstallAppButton />
         <button
           onClick={() => setShowSettings(!showSettings)}
           className={`px-4 py-2.5 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-2 shadow-md ${isDark ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-white/35 text-slate-850 hover:bg-white/50"}`}
@@ -743,11 +768,8 @@ const analyzeEmojiSentiment = (text) => {
                       const detected = detectType(value);
                       setType(detected);
                     }}
-                    // ============================================
-                    // ✅ UPDATED onKeyDown WITH ENTER KEY SUPPORT
-                    // ============================================
                     onKeyDown={(e) => {
-                      // ✅ Plain Enter key support (NEW - Issue #946)
+                      // ✅ Plain Enter key support (Issue #946)
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (!loading && text.trim().length > 0 && text.length <= 5000) {
@@ -764,15 +786,31 @@ const analyzeEmojiSentiment = (text) => {
                     }}
                   />
 
-                  {text && (
+                  {/* ✅ CLEAR BUTTON (Issue #948) */}
+                  {showClearButton && (
                     <button
-                      onClick={() => setText("")}
-                      className={`absolute top-3.5 right-3.5 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all hover:scale-110 shadow-sm ${isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white" : "bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-800"}`}
-                      title="Clear input"
+                      onClick={handleClear}
+                      className={`absolute top-3.5 right-3.5 w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold transition-all hover:scale-110 shadow-sm z-10 ${
+                        isDark 
+                          ? 'bg-red-900/40 text-red-400 hover:bg-red-800/60 hover:text-red-300 border border-red-700/30' 
+                          : 'bg-red-100 text-red-600 hover:bg-red-200 hover:text-red-700 border border-red-200'
+                      }`}
+                      title="Clear all (text, results, errors)"
                     >
                       ✕
                     </button>
                   )}
+
+                  {/* Keyboard Shortcut Hint */}
+                  {text && (
+                    <div className="absolute bottom-2 right-14 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+                      <kbd className="px-1 py-0.5 rounded bg-white dark:bg-slate-900 text-[9px] font-mono border border-slate-300 dark:border-slate-600">Enter</kbd>
+                      <span>or</span>
+                      <kbd className="px-1 py-0.5 rounded bg-white dark:bg-slate-900 text-[9px] font-mono border border-slate-300 dark:border-slate-600">⌘+Enter</kbd>
+                      <span>to submit</span>
+                    </div>
+                  )}
+
                   {text && (
                     <div className="flex flex-wrap justify-between items-center mt-1.5 px-1 text-xs font-medium tracking-wide opacity-70 gap-1">
                       <div className="flex flex-wrap gap-3">
@@ -792,15 +830,6 @@ const analyzeEmojiSentiment = (text) => {
                     )}
                   </div>)}
 
-                  {/* ✅ KEYBOARD SHORTCUT HINT (NEW - Issue #946) */}
-                  {text && (
-                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1.5 justify-start px-1">
-                      <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[9px] font-mono border border-slate-300 dark:border-slate-600">Enter</kbd>
-                      <span>or</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[9px] font-mono border border-slate-300 dark:border-slate-600">⌘+Enter</kbd>
-                      <span>to submit</span>
-                    </div>
-                  )}
                 </div>
 
                 <button
