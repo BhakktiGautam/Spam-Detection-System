@@ -39,7 +39,7 @@ import 'react-loading-skeleton/dist/skeleton.css';
 // ============================================
 
 const MAX_CHAR_LIMIT = 5000;
-const WARNING_CHAR_LIMIT = 500;
+const WARNING_CHAR_LIMIT = 400;
 
 const BADGES = {
   3: { name: '🔥 Novice Streaker', icon: '🔥', color: 'bg-orange-500', description: '3 day streak' },
@@ -586,25 +586,91 @@ function App() {
                     </div>
                   )}
 
-                  {/* Character Counter */}
-                  {text && (
-                    <div className="flex flex-wrap justify-between items-center mt-1.5 px-1 text-xs font-medium tracking-wide opacity-70 gap-1">
-                      <div className="flex flex-wrap gap-3">
-                        <span>📖 {calculateReadingTime(text)}</span>
-                        <span>📝 {getTextStats(text).words} words</span>
-                        <span>📏 Avg {getTextStats(text).avgWordLength} chars</span>
-                        <span>📄 {getTextStats(text).sentences} sentences</span>
-                      </div>
-                      {text.length > MAX_CHAR_LIMIT ? (
-                        <span className="text-red-500 font-bold">{text.length.toLocaleString()} / {MAX_CHAR_LIMIT} characters (Limit exceeded)</span>
-                      ) : (
-                        <span className={text.length > WARNING_CHAR_LIMIT ? "text-orange-500" : ""}>
-                          {text.length.toLocaleString()} characters
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+{/* ============================================
+    ENHANCED CHARACTER COUNTER (Issue #947)
+    ============================================ */}
+{text && (
+  <div className="mt-2 space-y-2">
+    {/* Stats Row */}
+    <div className="flex flex-wrap justify-between items-center px-1 text-xs font-medium tracking-wide opacity-80 gap-2">
+      <div className="flex flex-wrap gap-3">
+        <span className="flex items-center gap-1">📖 {calculateReadingTime(text)}</span>
+        <span className="flex items-center gap-1">📝 {getTextStats(text).words} words</span>
+        <span className="flex items-center gap-1">📏 Avg {getTextStats(text).avgWordLength} chars</span>
+        <span className="flex items-center gap-1">📄 {getTextStats(text).sentences} sentences</span>
+      </div>
+    </div>
+
+    {/* Character Counter with Progress Bar */}
+    <div className="space-y-1.5">
+      <div className="flex justify-between items-center px-1">
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          Character Count
+        </span>
+        <span className={`text-xs font-bold transition-colors duration-300 ${
+          text.length > MAX_CHAR_LIMIT 
+            ? 'text-red-500 dark:text-red-400' 
+            : text.length > WARNING_CHAR_LIMIT 
+              ? 'text-orange-500 dark:text-orange-400' 
+              : 'text-slate-400 dark:text-slate-500'
+        }`}>
+          {text.length.toLocaleString()} / {MAX_CHAR_LIMIT.toLocaleString()}
+          {text.length > MAX_CHAR_LIMIT && ' ⚠️'}
+        </span>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div 
+          className={`h-full rounded-full transition-all duration-500 ease-out ${
+            text.length > MAX_CHAR_LIMIT 
+              ? 'bg-red-500' 
+              : text.length > WARNING_CHAR_LIMIT 
+                ? 'bg-orange-500' 
+                : 'bg-emerald-500'
+          }`}
+          style={{ width: `${Math.min((text.length / MAX_CHAR_LIMIT) * 100, 100)}%` }}
+        />
+      </div>
+
+      {/* Warning Messages */}
+      {text.length > MAX_CHAR_LIMIT && (
+        <p className="text-xs text-red-500 dark:text-red-400 font-medium animate-pulse">
+          ⚠️ Limit exceeded! Please reduce your text to {MAX_CHAR_LIMIT.toLocaleString()} characters.
+        </p>
+      )}
+      {text.length > WARNING_CHAR_LIMIT && text.length <= MAX_CHAR_LIMIT && (
+        <p className="text-xs text-orange-500 dark:text-orange-400 font-medium">
+          ⚡ Approaching limit. {MAX_CHAR_LIMIT - text.length} characters remaining.
+        </p>
+      )}
+      {text.length <= WARNING_CHAR_LIMIT && text.length > 0 && (
+        <p className="text-xs text-slate-400 dark:text-slate-500">
+          {MAX_CHAR_LIMIT - text.length} characters remaining
+        </p>
+      )}
+    </div>
+
+    {/* Quick Stats Tags */}
+    <div className="flex flex-wrap gap-1.5 px-1">
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+        📝 {text.split(/\s+/).filter(w => w.length > 0).length} words
+      </span>
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+        📄 {text.split('\n').length} lines
+      </span>
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+        🔤 {text.match(/[A-Z]/g)?.length || 0} uppercase
+      </span>
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+        🔡 {text.match(/[a-z]/g)?.length || 0} lowercase
+      </span>
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+        🔢 {text.match(/\d/g)?.length || 0} numbers
+      </span>
+    </div>
+  </div>
+)}
 
                 {/* Analyze Button */}
                 <button
