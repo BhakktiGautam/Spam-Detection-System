@@ -350,6 +350,9 @@ const analyzeEmojiSentiment = (text) => {
     fetchWordOfTheDay();
   }, []);
 
+  // ============================================
+  // MAIN PREDICT FUNCTION
+  // ============================================
   const handlePredict = async () => {
     if (!text || text.trim().length === 0) return;
     const now = Date.now();
@@ -420,6 +423,19 @@ const analyzeEmojiSentiment = (text) => {
   });
   } finally {
       setLoading(false);
+    }
+  };
+
+  // ============================================
+  // ✅ HANDLE ENTER KEY (NEW - Issue #946)
+  // ============================================
+  const handleKeyDown = (e) => {
+    // Check if Enter key is pressed and not Shift+Enter (for multi-line)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Prevent newline in textarea
+      if (!loading && text.trim().length > 0 && text.length <= 5000) {
+        handlePredict();
+      }
     }
   };
 
@@ -727,17 +743,23 @@ const analyzeEmojiSentiment = (text) => {
                       const detected = detectType(value);
                       setType(detected);
                     }}
+                    // ============================================
+                    // ✅ UPDATED onKeyDown WITH ENTER KEY SUPPORT
+                    // ============================================
                     onKeyDown={(e) => {
-                      // Support Ctrl+Enter (Windows/Linux) and Cmd+Enter (macOS) to submit prediction
-                      if (
-                        (e.ctrlKey || e.metaKey) &&
-                        e.key === "Enter" &&
-                        !loading &&
-                        text.trim().length > 0 &&
-                        text.length <= 5000
-                      ) {
-                        e.preventDefault(); // Prevent default newline insertion
-                        handlePredict();
+                      // ✅ Plain Enter key support (NEW - Issue #946)
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (!loading && text.trim().length > 0 && text.length <= 5000) {
+                          handlePredict();
+                        }
+                      }
+                      // Support Ctrl+Enter (Windows/Linux) and Cmd+Enter (macOS)
+                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        if (!loading && text.trim().length > 0 && text.length <= 5000) {
+                          handlePredict();
+                        }
                       }
                     }}
                   />
@@ -770,6 +792,15 @@ const analyzeEmojiSentiment = (text) => {
                     )}
                   </div>)}
 
+                  {/* ✅ KEYBOARD SHORTCUT HINT (NEW - Issue #946) */}
+                  {text && (
+                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1.5 justify-start px-1">
+                      <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[9px] font-mono border border-slate-300 dark:border-slate-600">Enter</kbd>
+                      <span>or</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[9px] font-mono border border-slate-300 dark:border-slate-600">⌘+Enter</kbd>
+                      <span>to submit</span>
+                    </div>
+                  )}
                 </div>
 
                 <button
