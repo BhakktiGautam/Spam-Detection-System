@@ -27,7 +27,7 @@ from   enum                     import Enum
 import logging
 import os
 
-from   flask                    import jsonify
+from   flask                    import jsonify, request
 from   flask_limiter            import Limiter
 from   flask_limiter.errors     import RateLimitExceeded
 from   flask_limiter.util       import get_remote_address
@@ -64,6 +64,8 @@ class RateLimitPolicy(str, Enum):
     OCR = "ocr"
     WHOIS = "whois"
     THREAT_INTEL = "threat_intel"
+    BULK = "bulk"
+    EMAIL_FETCH = "email_fetch"
     DEFAULT = "default"
 
 
@@ -107,6 +109,23 @@ _POLICY_SPECS = {
         "THREAT_INTEL_RATE_LIMIT_MAX",
         "THREAT_INTEL_RATE_LIMIT_WINDOW_MS",
         "20 per minute",
+    ),
+    # Batch inference over an uploaded file is the heaviest CPU path, so it gets
+    # a tighter cap than single /predict calls. BULK_PREDICT_* mirrors the knob
+    # the Node backend already exposes for the same route.
+    RateLimitPolicy.BULK: _PolicySpec(
+        "BULK_PREDICT_RATE_LIMIT",
+        "BULK_PREDICT_RATE_LIMIT_MAX",
+        "BULK_PREDICT_RATE_LIMIT_WINDOW_MS",
+        "10 per minute",
+    ),
+    # Fetching a user's Gmail/Outlook inbox hits rate-limited third-party APIs,
+    # so throttle it independently of local ML work to protect those quotas.
+    RateLimitPolicy.EMAIL_FETCH: _PolicySpec(
+        "EMAIL_FETCH_RATE_LIMIT",
+        "EMAIL_FETCH_RATE_LIMIT_MAX",
+        "EMAIL_FETCH_RATE_LIMIT_WINDOW_MS",
+        "15 per minute",
     ),
     # DEFAULT reuses the shared RATE_LIMIT_MAX / RATE_LIMIT_WINDOW_MS pair the
     # Node backend already reads, so both services honour the same global knobs.
@@ -173,6 +192,14 @@ def rate_limit_exceeded_handler(exc):
     so clients keep their machine-readable backoff signal.
     """
     limit = getattr(exc, "description", None) or "rate limit"
+    # Operational visibility: one WARNING per rejected request so abuse of an
+    # expensive endpoint is greppable without enabling Flask-Limiter debug logs.
+    logger.warning(
+        "Rate limit exceeded: client=%s endpoint=%s limit=%s",
+        get_remote_address(),
+        request.endpoint,
+        limit,
+    )
     response = jsonify(
         {
             "success": False,

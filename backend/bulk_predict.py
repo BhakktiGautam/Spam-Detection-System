@@ -8,7 +8,7 @@ import numpy as np
 from   flask                    import (Blueprint, current_app, jsonify,
                                         request, send_file)
 
-from   rate_limiting            import limiter
+from   rate_limiting            import RateLimitPolicy, rate_limit
 
 bulk_predict_bp = Blueprint("bulk_predict", __name__)
 
@@ -122,7 +122,7 @@ def parse_and_predict_file(file):
 
 
 @bulk_predict_bp.route("/bulk-predict", methods=["POST"])
-@limiter.limit("50 per minute")
+@rate_limit(RateLimitPolicy.BULK)
 def bulk_predict():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
@@ -155,7 +155,7 @@ def bulk_predict():
 
 
 @bulk_predict_bp.route("/bulk-predict/export", methods=["POST"])
-@limiter.limit("50 per minute")
+@rate_limit(RateLimitPolicy.BULK)
 def bulk_predict_export():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
