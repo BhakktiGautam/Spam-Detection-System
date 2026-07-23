@@ -647,17 +647,6 @@ def predict():
             return jsonify({
                 "error": f"'text' must be a string, got {type(text).__name__}"
             }), 400
-
-        normalized_text = normalizer.normalize(text)
-        vectorized = vectorizer.transform([normalized_text])
-        prediction = model.predict(vectorized)[0]
-    
-        return jsonify({
-          'original_text': text,
-          'normalized_text': normalized_text,
-          'prediction': prediction
-        })
-
         # Maximum-length validation before any vectorization/inference work.
         if len(text) > MAX_MESSAGE_LENGTH:
             return jsonify({
