@@ -1,6 +1,9 @@
 // backend/routes/emailIntegrationRoutes.js
 const express = require('express');
 const router = express.Router();
+const attachmentScanner = require('../services/attachmentScanner');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
 const { protect } = require('../middleware/authMiddleware');
 const {
   gmailAuthUrl,
@@ -31,6 +34,24 @@ router.post('/email-breakdown', protect, async (req, res) => {
     res.json(breakdown);
   } catch (error) {
     res.status(500).json({ error: 'Failed to analyze email' });
+  }
+});
+
+router.post('/scan-attachment', protect, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const result = attachmentScanner.scanAttachment(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to scan attachment' });
   }
 });
 
