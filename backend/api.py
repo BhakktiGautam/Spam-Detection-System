@@ -1063,6 +1063,7 @@ def gmail_callback():
 @app.route("/gmail/emails", methods=["GET"])
 @validate_request
 @validate_internal_request
+@rate_limit(RateLimitPolicy.EMAIL_FETCH)
 def gmail_emails():
     username = _require_username()
     if not username:
@@ -1122,6 +1123,7 @@ def outlook_callback():
 
 @app.route("/outlook/emails", methods=["GET"])
 @validate_internal_request
+@rate_limit(RateLimitPolicy.EMAIL_FETCH)
 def outlook_emails():
     username = _require_username()
     if not username:
@@ -1151,6 +1153,7 @@ def outlook_emails():
 
 @app.route("/scan-emails", methods=["POST"])
 @validate_internal_request
+@rate_limit(RateLimitPolicy.THREAT_INTEL)
 def scan_emails_route():
     data = request.get_json(silent=True) or {}
     provider = data.get("provider", "").lower()
