@@ -25,17 +25,24 @@ DNSBL_PROVIDERS = [
     "dbl.spamhaus.org",      # Domain blocklist
 ]
 
+# Cap the text scanned for domains so a pathologically large, attacker-supplied
+# body cannot turn extraction into a performance sink (issue #940).
+MAX_TEXT_LENGTH = 100_000
+
 def extract_domains(text: str) -> List[str]:
     """
     Extract domains from text using regex.
     Returns unique domains found in the message.
     """
-    # Regex to extract domains from URLs and plain text
-    pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)'
+    if len(text) > MAX_TEXT_LENGTH:
+        text = text[:MAX_TEXT_LENGTH]
+    # DNS labels/TLDs are capped at 63 octets; bounding the quantifiers keeps the
+    # scan linear on adversarial label runs without changing which domains match.
+    pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]{1,63}\.[a-zA-Z]{2,63}(?:\.[a-zA-Z]{2,63})?)'
     urls = re.findall(pattern, text, re.IGNORECASE)
     
     # Also find domains not in URL format
-    domain_pattern = r'\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)\b'
+    domain_pattern = r'\b([a-zA-Z0-9-]{1,63}\.[a-zA-Z]{2,63}(?:\.[a-zA-Z]{2,63})?)\b'
     domains = re.findall(domain_pattern, text, re.IGNORECASE)
     
     # Combine and remove duplicates
