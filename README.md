@@ -359,6 +359,26 @@ When the limit is exceeded the API returns:
 
 `HTTP 429 Too Many Requests`
 
+### Flask ML API: per-endpoint limits
+
+The Python ML API applies dedicated limits to its expensive endpoints on top of a
+shared default. Counters are stored in-memory by default; set `REDIS_URL` (or
+`RATE_LIMIT_STORAGE_URI`) to enforce limits across multiple workers/instances,
+with automatic in-memory fallback if Redis is unreachable.
+
+| Endpoint(s) | Policy | Default | Override |
+| --- | --- | --- | --- |
+| `/predict` | prediction | 50/min | `PREDICT_RATE_LIMIT` |
+| `/bulk-predict`, `/bulk-predict/export` | batch inference | 10/min | `BULK_PREDICT_RATE_LIMIT` |
+| `/scan-emails` | threat intel | 20/min | `THREAT_INTEL_RATE_LIMIT` |
+| `/gmail/emails`, `/outlook/emails` | inbox fetch | 15/min | `EMAIL_FETCH_RATE_LIMIT` |
+| everything else | default | 50/min | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` |
+
+Each limit accepts either the native `"<n> per <window>"` form or the Node-style
+`*_MAX` + `*_WINDOW_MS` pair. Exceeding a limit returns a JSON `429` with a
+`Retry-After` header, and each rejection is logged with the client, endpoint, and
+limit for operational visibility.
+
 ---
 
 ## 💻 React Frontend

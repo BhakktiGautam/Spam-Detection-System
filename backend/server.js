@@ -22,27 +22,17 @@ const compression = require('compression');
 const { v4: uuidv4 } = require('uuid');
 const helmet = require('helmet');
 const axios = require("axios");
-<<<<<<< Updated upstream
+
 const { corsOptions } = require('./config/corsConfig');
-=======
->>>>>>> Stashed changes
+
 
 // Initialize background jobs
 require('./jobs/archivalCron');
 require('./jobs/webhookRetryCron');
 const { preventCacheStampede } = require('./middleware/cacheMiddleware');
-<<<<<<< HEAD
+
 const adversarialRoutes = require('./routes/adversarialRoutes');
-app.use('/api/adversarial', adversarialRoutes);
-
-// Add EvoMail routes
 const evoMailRoutes = require('./routes/evoMailRoutes');
-app.use('/api/evomail', evoMailRoutes);
-
-// ===== STARTUP TIMER =====
-const SERVER_START_TIME = Date.now();
-const startupLogs = [];
-// Add Poisoning Defense routes
 const poisoningRoutes = require('./routes/poisoningRoutes');
 app.use('/api/poisoning', poisoningRoutes);
 
@@ -50,15 +40,12 @@ app.use('/api/poisoning', poisoningRoutes);
 const visualRoutes = require('./routes/visualRoutes');
 app.use('/api/visual', visualRoutes);
 const logStartupTime= (component, startTime) => {
-<<<<<<< Updated upstream
 
-=======
-=======
->>>>>>> Stashed changes
 
 // Add EvoMail routes
 const evoMailRoutes = require('./routes/evoMailRoutes');
 app.use('/api/evomail', evoMailRoutes);
+
 
 const healthRoutes = require("./routes/healthRoutes");
 const predictionRoutes = require("./routes/predictionRoutes");
@@ -73,15 +60,11 @@ const startupLogs = [];
 const { configureAxios } = require('./config/axios');
 configureAxios(); // Apply the global axios configuration
 const logStartupTime = (component, startTime) => {
-<<<<<<< Updated upstream
-=======
->>>>>>> 42c19e1f454b08381ffc8132bf9ae9f6a57dabda
->>>>>>> Stashed changes
+
   const elapsed = Date.now() - startTime;
   startupLogs.push({ component, elapsed });
   logger.info(`⏱️ ${component} loaded in ${elapsed}ms`);
 };
-
 
 const mongoose = require("mongoose");
 
@@ -91,10 +74,11 @@ const User = require("./models/User");
 const { matchKeywordRule } = require("./utils/keywordRules");
 
 const displayBanner = require('./utils/banner');
-  const { upload } = require('./config/multerConfig');
+const { upload } = require('./config/multerConfig');
 const FormData = require("form-data");
 
 const app = express();
+
 
 
 // Apply standard throttling to the heavy ML prediction route
@@ -227,15 +211,14 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use('/uploads', express.static('uploads'));
 
-<<<<<<< Updated upstream
+
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   explorer: true,
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'Spam Detection API Docs'
 }));
 
-=======
->>>>>>> Stashed changes
+
 // ===== REQUEST ID MIDDLEWARE =====
 app.use((req, res, next) => {
   // Generate a unique request ID
@@ -319,19 +302,22 @@ app.use("/api/chat", chatRoutes);
 app.use("/health", healthRoutes);
 app.use("/api/rules", ruleRoutes);
 app.use("/api/reports", reportRoutes);
+app.use('/api/adversarial', adversarialRoutes);
+app.use('/api/evomail', evoMailRoutes);
+app.use('/api/poisoning', poisoningRoutes);
+
 
 
 app.get("/", (req, res) => {
   res.send("Node backend running ");
 });
 
-<<<<<<< Updated upstream
+
 app.get('/api-docs.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerSpec);
 });
-=======
->>>>>>> Stashed changes
+
 
 // ========================================
 // START SERVER

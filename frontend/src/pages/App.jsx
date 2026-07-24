@@ -34,6 +34,14 @@ import RulesManager from "../components/RulesManager";
 import AdminRulesManager from "../components/AdminRulesManager";
 import AdminFeedbackView from "../components/AdminFeedbackView";
 
+// ============================================
+// CONSTANTS - Character Counter (Issue #947)
+// ============================================
+
+const MAX_CHAR_LIMIT = 5000;
+const WARNING_CHAR_LIMIT = 500;
+const CHARS_WARNING_LEVEL = 400; // 80% of 500
+
 function App() {
   const navigate = useNavigate();
   const [text, setText] = useState("");
@@ -460,7 +468,7 @@ const analyzeEmojiSentiment = (text) => {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!loading && text.trim().length > 0 && text.length <= 5000) {
+      if (!loading && text.trim().length > 0 && text.length <= MAX_CHAR_LIMIT) {
         handlePredict();
       }
     }
@@ -764,6 +772,7 @@ const analyzeEmojiSentiment = (text) => {
                   <textarea
                     className={`w-full border p-4 pr-12 rounded-2xl focus:outline-none focus:ring-2 resize-none text-sm sm:text-base transition-all shadow-inner leading-relaxed [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full ${isDark ? `${activeTheme.inputDark} focus:border-blue-500/50 [&::-webkit-scrollbar-thumb]:bg-slate-700 hover:[&::-webkit-scrollbar-thumb]:bg-slate-600` : `${activeTheme.input} focus:border-indigo-500/50 [&::-webkit-scrollbar-thumb]:bg-slate-300 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400`}`}
                     rows="5"
+                    maxLength={MAX_CHAR_LIMIT}
                     placeholder={type === "url" ? "Paste or type the suspicious website link URL here to test..." : type === "message" ? "Type your SMS or chat message content here for inspection..." : "Paste the full text or body of your email content here..."}
                     value={text}
                     onChange={(e) => {
@@ -776,14 +785,14 @@ const analyzeEmojiSentiment = (text) => {
                       // ✅ Plain Enter key support (Issue #946)
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        if (!loading && text.trim().length > 0 && text.length <= 5000) {
+                        if (!loading && text.trim().length > 0 && text.length <= MAX_CHAR_LIMIT) {
                           handlePredict();
                         }
                       }
                       // Support Ctrl+Enter (Windows/Linux) and Cmd+Enter (macOS)
                       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                         e.preventDefault();
-                        if (!loading && text.trim().length > 0 && text.length <= 5000) {
+                        if (!loading && text.trim().length > 0 && text.length <= MAX_CHAR_LIMIT) {
                           handlePredict();
                         }
                       }
@@ -815,24 +824,29 @@ const analyzeEmojiSentiment = (text) => {
                     </div>
                   )}
 
+                  {/* ============================================
+                      ✅ ENHANCED CHARACTER COUNTER (Issue #947)
+                      ============================================ */}
                   {text && (
                     <div className="flex flex-wrap justify-between items-center mt-1.5 px-1 text-xs font-medium tracking-wide opacity-70 gap-1">
                       <div className="flex flex-wrap gap-3">
-                       <span>📖 {calculateReadingTime(text)}</span>
-                      <span>📝 {getTextStats(text).words} words</span>
-                      <span>📏 Avg {getTextStats(text).avgWordLength} chars</span>
-                      <span>📄 {getTextStats(text).sentences} sentences</span>
+                        <span>📖 {calculateReadingTime(text)}</span>
+                        <span>📝 {getTextStats(text).words} words</span>
+                        <span>📏 Avg {getTextStats(text).avgWordLength} chars</span>
+                        <span>📄 {getTextStats(text).sentences} sentences</span>
+                      </div>
+                      {text.length > MAX_CHAR_LIMIT ? (
+                        <span className="text-red-500 font-bold animate-pulse">
+                          {text.length.toLocaleString()} / {MAX_CHAR_LIMIT.toLocaleString()} characters ⚠️
+                        </span>
+                      ) : (
+                        <span className={text.length > WARNING_CHAR_LIMIT ? "text-orange-500 font-semibold" : "text-slate-400 dark:text-slate-500"}>
+                          {text.length.toLocaleString()} / {MAX_CHAR_LIMIT.toLocaleString()} characters
+                          {text.length > WARNING_CHAR_LIMIT && ` (${MAX_CHAR_LIMIT - text.length} remaining)`}
+                        </span>
+                      )}
                     </div>
-                    {text.length > 5000 ? (
-                      <span className="text-red-500 font-bold">
-                        {Math.max(0, text.length).toLocaleString()} / 5000 characters (Limit exceeded)
-                      </span>
-                    ) : (
-                      <span className={text.length > 500 ? "text-orange-500" : ""}>
-                        {Math.max(0, text.length).toLocaleString()} characters
-                      </span>
-                    )}
-                  </div>)}
+                  )}
 
                 </div>
 
@@ -841,7 +855,7 @@ const analyzeEmojiSentiment = (text) => {
                     if (!text.trim()) return;
                     handlePredict();
                   }}
-                  disabled={loading || text.trim().length === 0 || text.length > 5000}
+                  disabled={loading || text.trim().length === 0 || text.length > MAX_CHAR_LIMIT}
                   className={`mt-2 w-full py-3.5 rounded-xl font-bold text-white shadow-md active:scale-95 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${activeTheme.accent}`}
                 >
                   {loading && (

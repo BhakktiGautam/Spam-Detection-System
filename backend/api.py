@@ -30,9 +30,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from routes.analytics import analytics_bp
 from routes.analytics import record_scan
-from flask_limiter import Limiter
-from flask_limiter.errors import RateLimitExceeded
-from flask_limiter.util import get_remote_address
+from rate_limiting import RateLimitPolicy, configure_rate_limiting, rate_limit
 from gmail_connector import get_gmail_auth_url, get_gmail_tokens, refresh_gmail_token, fetch_gmail_emails
 from outlook_connector import get_outlook_auth_url, get_outlook_tokens, refresh_outlook_token, fetch_outlook_emails
 from email_scanner import scan_emails_with_model
@@ -61,11 +59,9 @@ except ImportError:
     NLTK_AVAILABLE = False
 
 
-<<<<<<< Updated upstream
 
-=======
 sys.path.insert(0, str(Path(__file__).resolve().parent / "email_connectors"))
->>>>>>> Stashed changes
+
 
 load_dotenv()
 
@@ -74,17 +70,11 @@ app = Flask(__name__)
 xai_engine = ExplanationEngine()
 CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
-# ── Rate limiting (ML inference protection) ──────────────────────────────────
-PREDICT_RATE_LIMIT = os.getenv("PREDICT_RATE_LIMIT", "50 per minute")
-
-from extensions import limiter
-app.config["RATELIMIT_DEFAULT"] = PREDICT_RATE_LIMIT
-limiter.init_app(app)
-
-# Flask-Limiter uses a default 429 HTML response; standardize to JSON.
-@app.errorhandler(RateLimitExceeded)
-def ratelimit_handler(e):
-    return jsonify({"error": "Too Many Requests", "rate_limit": PREDICT_RATE_LIMIT}), 429
+# ── Rate limiting for expensive endpoints (issue #939) ───────────────────
+# Reusable, distributed (Redis with in-memory fallback) throttling. Endpoints
+# opt into named policies with the @rate_limit decorator; the shared limiter and
+# JSON 429 handler are configured here. See rate_limiting.py.
+configure_rate_limiting(app)
 
 
 # ============================================
@@ -151,12 +141,10 @@ def validate_internal_request(f):
         return f(*args, **kwargs)
     return decorated_function
 
-<<<<<<< Updated upstream
 # Alias used by routes that gate on the internal service-to-service secret.
 internal_endpoint_required = validate_internal_request
 
-=======
->>>>>>> Stashed changes
+
 # Apply to all routes by default (except public paths)
 @app.before_request
 def require_internal_secret():
@@ -189,11 +177,11 @@ def ip_allowlist(f):
         allowed_ips = os.getenv("SERVICE_IP_ALLOWLIST", "127.0.0.1,::1")
         allowed_list = [ip.strip() for ip in allowed_ips.split(",")]
         
-<<<<<<< Updated upstream
+
         client_ip = request.headers.get("X-Forwarded-For", request.remote_addr) or ""
-=======
+
         client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
->>>>>>> Stashed changes
+
         # Get first IP if multiple
         if "," in client_ip:
             client_ip = client_ip.split(",")[0].strip()
@@ -205,21 +193,14 @@ def ip_allowlist(f):
                 "error": "Access denied from this IP address"
             }), 403
         
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
         return f(*args, **kwargs)
     return decorated_function
 
 
-<<<<<<< Updated upstream
 
 # ============================================
 
-=======
-# ============================================
->>>>>>> Stashed changes
 # ZERO TRUST - REQUEST VALIDATION
 # ============================================
 
@@ -255,11 +236,9 @@ def validate_request(f):
     return decorated_function
 
 
-<<<<<<< Updated upstream
 
-=======
 # ============================================
->>>>>>> Stashed changes
+
 # ZERO TRUST - AUDIT LOGGING
 # ============================================
 
@@ -338,22 +317,21 @@ from xai_service import XAIService
 xai_service = XAIService(model=model, vectorizer=vectorizer, label_encoder=label_encoder)
 
 
-<<<<<<< Updated upstream
-=======
+
 # In-memory storage for spam words
 spam_words_storage = {}
->>>>>>> Stashed changes
+
 
 # SQLite Persistent Storage for spam words
 import sqlite3
 from datetime import datetime, timezone
 
-<<<<<<< Updated upstream
+
 
 
 def init_spam_words_db():
     with imap_store.get_db_connection() as conn:
-=======
+
 def _db_connection():
     conn = sqlite3.connect(imap_store.DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -361,7 +339,7 @@ def _db_connection():
 
 def init_spam_words_db():
     with _db_connection() as conn:
->>>>>>> Stashed changes
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS spam_word_frequencies (
@@ -376,11 +354,11 @@ def init_spam_words_db():
 
 def increment_spam_word_frequency(word):
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-<<<<<<< Updated upstream
+
     with imap_store.get_db_connection() as conn:
-=======
+
     with _db_connection() as conn:
->>>>>>> Stashed changes
+
         conn.execute(
             """
             INSERT INTO spam_word_frequencies (word, day, count)
@@ -392,11 +370,10 @@ def increment_spam_word_frequency(word):
         conn.commit()
 
 def get_db_wordcloud_data():
-<<<<<<< Updated upstream
     with imap_store.get_db_connection() as conn:
-=======
+
     with _db_connection() as conn:
->>>>>>> Stashed changes
+
         rows = conn.execute(
             """
             SELECT word, SUM(count) as total_count
@@ -454,11 +431,11 @@ SPAM_WORD_METADATA = {
 def get_word_of_the_day_data():
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     word_row = None
-<<<<<<< Updated upstream
+
     with imap_store.get_db_connection() as conn:
-=======
+
     with _db_connection() as conn:
->>>>>>> Stashed changes
+
         word_row = conn.execute(
             """
             SELECT word, SUM(count) as total_count
@@ -481,11 +458,7 @@ def get_word_of_the_day_data():
                 LIMIT 1
                 """
             ).fetchone()
-<<<<<<< Updated upstream
-    
-=======
-            
->>>>>>> Stashed changes
+
     if word_row:
         word = word_row["word"]
         count = word_row["total_count"]
@@ -508,15 +481,14 @@ def get_word_of_the_day_data():
     }
 
 
-<<<<<<< Updated upstream
 app.model = model  # type: ignore[attr-defined]
 app.vectorizer = vectorizer  # type: ignore[attr-defined]
 app.label_encoder = label_encoder  # type: ignore[attr-defined]
-=======
+
 app.model = model
 app.vectorizer = vectorizer
 app.label_encoder = label_encoder
->>>>>>> Stashed changes
+
 
 from bulk_predict import bulk_predict_bp
 app.register_blueprint(bulk_predict_bp)
@@ -524,14 +496,12 @@ app.register_blueprint(analytics_bp)
 
 url_model = joblib.load(URL_MODEL_PATH)
 url_vectorizer = joblib.load(URL_VECTORIZER_PATH)
-<<<<<<< Updated upstream
+
 URL_LABELS = {0: "malicious", 1: "safe"}
 # url_detector.pkl predicts numeric classes with no bundled label encoder
 URL_LABELS = {0: "safe", 1: "malicious"}
 
 
-=======
->>>>>>> Stashed changes
 
 URL_LABELS = {0: "malicious", 1: "safe"}
 
@@ -539,10 +509,7 @@ URL_LABELS = {0: "malicious", 1: "safe"}
 URL_LABELS = {0: "safe", 1: "malicious"}
 
 
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
 # Heuristic checks
 SUSPICIOUS_TLDS = {
     "tk", "ml", "ga", "cf", "gq", "xyz", "top", "work", "click", "loan", "men", "review",
@@ -641,12 +608,11 @@ def make_prediction_response(
     translated=False,
     translated_text=None,
     domain_analysis=None,
-<<<<<<< Updated upstream
     explanation=None,
     severity=None
-=======
+
     explanation=None
->>>>>>> Stashed changes
+
 ):
     """Enforces a strict standardized response schema for all predictions."""
     response = {
@@ -664,7 +630,7 @@ def make_prediction_response(
         response["translated_text"] = translated_text
     if domain_analysis is not None:
         response["domain_analysis"] = domain_analysis
-<<<<<<< Updated upstream
+
         # Thin, top-level summary of domain_analysis for consumers that just
         # want a quick URL risk signal without parsing the full breakdown.
         response["url_risk"] = {
@@ -676,10 +642,10 @@ def make_prediction_response(
         response["explanation"] = explanation
     if severity is not None:
         response["severity"] = severity
-=======
+
     if explanation is not None:
         response["explanation"] = explanation
->>>>>>> Stashed changes
+
     return response
 
 
@@ -687,7 +653,7 @@ def make_prediction_response(
 @validate_request
 @validate_internal_request
 @ip_allowlist
-@limiter.limit(PREDICT_RATE_LIMIT)
+@rate_limit(RateLimitPolicy.PREDICT)
 def predict():
 
     # Initialize final_output to prevent NameError/UnboundLocalError in case of early/conditional references
@@ -695,7 +661,7 @@ def predict():
 
 
     try:
-<<<<<<< Updated upstream
+
         data = request.get_json(silent=True)
         if data is None:
             raw_body = request.get_data(cache=True)
@@ -718,9 +684,9 @@ def predict():
                 "error": f"Request body must be a JSON object, got {type(data).__name__}"
             }), 400
 
-=======
+
         data = request.get_json(silent=True) or {}
->>>>>>> Stashed changes
+
         text = data.get("text")
         input_type = data.get("type", "message")
 
@@ -734,7 +700,6 @@ def predict():
                 "error": f"'text' must be a string, got {type(text).__name__}"
             }), 400
 
-<<<<<<< Updated upstream
         normalized_text = normalizer.normalize(text)
         vectorized = vectorizer.transform([normalized_text])
         prediction = model.predict(vectorized)[0]
@@ -745,9 +710,9 @@ def predict():
           'prediction': prediction
         })
 
+
         # Maximum-length validation before any vectorization/inference work.
-=======
->>>>>>> Stashed changes
+
         if len(text) > MAX_MESSAGE_LENGTH:
             return jsonify({
                 "error": (
@@ -822,11 +787,11 @@ def predict():
         else:
             confidence_level = "low"
 
-<<<<<<< Updated upstream
+
         if final_output != "ham":
-=======
+
         if final_output == "spam":
->>>>>>> Stashed changes
+
             words = extract_words(text)
             for word in words:
                 try:
@@ -844,10 +809,7 @@ def predict():
         explanation = xai_engine.analyze(text, input_type=input_type)
         severity = calculate_spam_severity(original_text)
 
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
         response_data = {
             "input": original_text,
             "result": final_output,
@@ -875,12 +837,11 @@ def predict():
             translated=translated,
             translated_text=text if translated else None,
             domain_analysis=domain_analysis,
-<<<<<<< Updated upstream
+
             explanation=explanation,
             severity=severity
-=======
             explanation=explanation
->>>>>>> Stashed changes
+
         )
 
 
@@ -911,7 +872,7 @@ def extract_words(text):
 
 
 def get_wordcloud_data():
-<<<<<<< Updated upstream
+
     """Return stored spam word frequencies from database."""
     try:
         data = get_db_wordcloud_data()
@@ -920,7 +881,7 @@ def get_wordcloud_data():
         print(f"[db-wordcloud] failed to get wordcloud data: {e}")
         return None
 
-=======
+
 
    if spam_words_storage:
 
@@ -929,7 +890,7 @@ def get_wordcloud_data():
         sorted_words = sorted(spam_words_storage.items(), key=lambda x: x[1], reverse=True)
         return [{"word": w, "count": c} for w, c in sorted_words[:50]]
     return None
->>>>>>> Stashed changes
+
 
     """Return stored spam word frequencies from database."""
     try:
@@ -1029,7 +990,7 @@ def feedback():
         return jsonify({"error": "Failed to record feedback."}), 500
 
 
-<<<<<<< Updated upstream
+
 @app.route("/feedback/stats", methods=["GET"])
 @validate_request
 @validate_internal_request
@@ -1096,8 +1057,7 @@ def feedback_stats():
     })
 
 
-=======
->>>>>>> Stashed changes
+
 # ============================================
 # EMAIL HEADER ANALYSIS
 # ============================================
@@ -1159,8 +1119,6 @@ def get_insights():
 # EMAIL PROVIDER ROUTES
 # ============================================
 
-TOKEN_STORE = {}
-
 
 @app.route("/gmail/auth-url", methods=["GET"])
 @validate_request
@@ -1189,15 +1147,13 @@ def gmail_callback():
 @app.route("/gmail/emails", methods=["GET"])
 @validate_request
 @validate_internal_request
+@rate_limit(RateLimitPolicy.EMAIL_FETCH)
 def gmail_emails():
     username = _require_username()
     if not username:
         return jsonify({"error": "Missing X-User-Username header"}), 401
 
-    user_tokens = TOKEN_STORE.get(username, {}).get("gmail")
-
     user_tokens = oauth_store.get_oauth_tokens(username, "gmail")
-    
 
     if not user_tokens:
         return jsonify({"error": "Gmail account not connected"}), 401
@@ -1251,6 +1207,7 @@ def outlook_callback():
 
 @app.route("/outlook/emails", methods=["GET"])
 @validate_internal_request
+@rate_limit(RateLimitPolicy.EMAIL_FETCH)
 def outlook_emails():
     username = _require_username()
     if not username:
@@ -1280,6 +1237,7 @@ def outlook_emails():
 
 @app.route("/scan-emails", methods=["POST"])
 @validate_internal_request
+@rate_limit(RateLimitPolicy.THREAT_INTEL)
 def scan_emails_route():
     data = request.get_json(silent=True) or {}
     provider = data.get("provider", "").lower()
@@ -1336,10 +1294,9 @@ def scan_emails_route():
 
 imap_store.init_db()
 oauth_store.init_db()
-<<<<<<< Updated upstream
+
 init_spam_words_db()
-=======
->>>>>>> Stashed changes
+
 scheduler = BackgroundScheduler()
 scheduler.start()
 
