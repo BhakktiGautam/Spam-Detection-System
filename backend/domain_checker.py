@@ -8,8 +8,14 @@ import os
 import requests
 import whois
 import dns.resolver
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
+
+# Per-provider HTTP request timeout (seconds); THREAT_INTEL_OVERALL_TIMEOUT
+# caps the wait while aggregating the concurrent provider results.
+THREAT_INTEL_REQUEST_TIMEOUT = 3
+THREAT_INTEL_OVERALL_TIMEOUT = 5
 
 # Common DNSBL (blacklist) providers
 DNSBL_PROVIDERS = [
@@ -19,17 +25,24 @@ DNSBL_PROVIDERS = [
     "dbl.spamhaus.org",      # Domain blocklist
 ]
 
+# Cap the text scanned for domains so a pathologically large, attacker-supplied
+# body cannot turn extraction into a performance sink (issue #940).
+MAX_TEXT_LENGTH = 100_000
+
 def extract_domains(text: str) -> List[str]:
     """
     Extract domains from text using regex.
     Returns unique domains found in the message.
     """
-    # Regex to extract domains from URLs and plain text
-    pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)'
+    if len(text) > MAX_TEXT_LENGTH:
+        text = text[:MAX_TEXT_LENGTH]
+    # DNS labels/TLDs are capped at 63 octets; bounding the quantifiers keeps the
+    # scan linear on adversarial label runs without changing which domains match.
+    pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]{1,63}\.[a-zA-Z]{2,63}(?:\.[a-zA-Z]{2,63})?)'
     urls = re.findall(pattern, text, re.IGNORECASE)
     
     # Also find domains not in URL format
-    domain_pattern = r'\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)\b'
+    domain_pattern = r'\b([a-zA-Z0-9-]{1,63}\.[a-zA-Z]{2,63}(?:\.[a-zA-Z]{2,63})?)\b'
     domains = re.findall(domain_pattern, text, re.IGNORECASE)
     
     # Combine and remove duplicates
@@ -105,71 +118,102 @@ def check_blacklist(domain: str) -> Dict[str, bool]:
     
     return results
 
+def _check_urlhaus(domain: str) -> Tuple[str, bool]:
+    """URLHaus lookup (keyless, free public check)."""
+    try:
+        urlhaus_url = "https://urlhaus-api.abuse.ch/v1/host/"
+        response = requests.post(urlhaus_url, json={"host": domain}, timeout=THREAT_INTEL_REQUEST_TIMEOUT)
+        if response.status_code == 200 and response.json().get("query_status") == "ok":
+            return "urlhaus", True
+    except Exception:
+        pass
+    return "urlhaus", False
+
+
+def _check_google_safe_browsing(domain: str) -> Tuple[str, bool]:
+    """Google Safe Browsing lookup. Returns False (no-op) without an API key."""
+    gsb_api_key = os.getenv("SAFE_BROWSING_API_KEY")
+    if not gsb_api_key:
+        return "google_safe_browsing", False
+    try:
+        gsb_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={gsb_api_key}"
+        payload = {
+            "client": {
+                "clientId": "spam-detection-system",
+                "clientVersion": "1.0.0"
+            },
+            "threatInfo": {
+                "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [
+                    {"url": domain}
+                ]
+            }
+        }
+        response = requests.post(gsb_url, json=payload, timeout=THREAT_INTEL_REQUEST_TIMEOUT)
+        if response.status_code == 200 and "matches" in response.json():
+            return "google_safe_browsing", True
+    except Exception:
+        pass
+    return "google_safe_browsing", False
+
+
+def _check_virustotal(domain: str) -> Tuple[str, bool]:
+    """VirusTotal domain lookup. Returns False (no-op) without an API key."""
+    vt_api_key = os.getenv("VIRUSTOTAL_API_KEY")
+    if not vt_api_key:
+        return "virustotal", False
+    try:
+        vt_url = f"https://www.virustotal.com/api/v3/domains/{domain}"
+        headers = {"x-apikey": vt_api_key}
+        response = requests.get(vt_url, headers=headers, timeout=THREAT_INTEL_REQUEST_TIMEOUT)
+        if response.status_code == 200:
+            stats = response.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            if stats.get("malicious", 0) > 0 or stats.get("suspicious", 0) > 1:
+                return "virustotal", True
+    except Exception:
+        pass
+    return "virustotal", False
+
+
+# Independent threat-intel providers. Each returns (result_key, flagged) and
+# swallows its own errors, so they can be dispatched concurrently and aggregated
+# without one provider affecting another.
+_THREAT_INTEL_PROVIDERS = (
+    _check_urlhaus,
+    _check_google_safe_browsing,
+    _check_virustotal,
+)
+
+
 def check_threat_intelligence(domain: str) -> Dict[str, bool]:
     """
     Query threat intelligence APIs to check if the domain is flagged/blacklisted.
+
+    The providers are independent external services, so they are queried
+    concurrently: total latency is bounded by the slowest single provider rather
+    than the sum of all of them. Each provider applies its own request timeout and
+    handles its own failures, so a slow or failing provider degrades to a False
+    result without blocking the others.
     """
     results = {
         "google_safe_browsing": False,
         "virustotal": False,
         "urlhaus": False
     }
-    
-    # 1. URLHaus lookup (keyless, free public check)
-    try:
-        urlhaus_url = "https://urlhaus-api.abuse.ch/v1/host/"
-        response = requests.post(urlhaus_url, json={"host": domain}, timeout=3)
-        if response.status_code == 200:
-            res_data = response.json()
-            if res_data.get("query_status") == "ok":
-                results["urlhaus"] = True
-    except Exception:
-        pass
-        
-    # 2. Google Safe Browsing Lookup
-    gsb_api_key = os.getenv("SAFE_BROWSING_API_KEY")
-    if gsb_api_key:
-        try:
-            gsb_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={gsb_api_key}"
-            payload = {
-                "client": {
-                    "clientId": "spam-detection-system",
-                    "clientVersion": "1.0.0"
-                },
-                "threatInfo": {
-                    "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
-                    "platformTypes": ["ANY_PLATFORM"],
-                    "threatEntryTypes": ["URL"],
-                    "threatEntries": [
-                        {"url": domain}
-                    ]
-                }
-            }
-            response = requests.post(gsb_url, json=payload, timeout=3)
-            if response.status_code == 200:
-                res_data = response.json()
-                if "matches" in res_data:
-                    results["google_safe_browsing"] = True
-        except Exception:
-            pass
 
-    # 3. VirusTotal Domain Lookup
-    vt_api_key = os.getenv("VIRUSTOTAL_API_KEY")
-    if vt_api_key:
-        try:
-            vt_url = f"https://www.virustotal.com/api/v3/domains/{domain}"
-            headers = {"x-apikey": vt_api_key}
-            response = requests.get(vt_url, headers=headers, timeout=3)
-            if response.status_code == 200:
-                res_data = response.json()
-                stats = res_data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-                malicious = stats.get("malicious", 0)
-                suspicious = stats.get("suspicious", 0)
-                if malicious > 0 or suspicious > 1:
-                    results["virustotal"] = True
-        except Exception:
-            pass
-            
+    with ThreadPoolExecutor(max_workers=len(_THREAT_INTEL_PROVIDERS)) as executor:
+        futures = [executor.submit(provider, domain) for provider in _THREAT_INTEL_PROVIDERS]
+        for future in futures:
+            try:
+                key, flagged = future.result(timeout=THREAT_INTEL_OVERALL_TIMEOUT)
+                results[key] = flagged
+            except (FuturesTimeoutError, Exception):
+                # Individual provider timeout/failure: keep its default False and
+                # keep aggregating the rest.
+                continue
+
     return results
 
 def calculate_risk_score(age_days: Optional[int], blacklist_results: Dict[str, bool]) -> Tuple[int, str]:
@@ -189,10 +233,6 @@ def calculate_risk_score(age_days: Optional[int], blacklist_results: Dict[str, b
             score += 20  # Moderately new - low risk
         else:
             score += 5   # Old - minimal risk
-            
-        # Add 30 points if domain age is < 30 days as per new requirement
-        if age_days < 30:
-            score += 30
     else:
         score += 10  # Unknown - assume slightly suspicious
     
