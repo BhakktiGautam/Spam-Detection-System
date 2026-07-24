@@ -30,7 +30,7 @@ router.delete("/:id", deleteHistoryItem);
 router.delete("/", clearHistory);
 
 router.get('/count', getHistoryCount);
-<<<<<<< Updated upstream
+
 module.exports = router;
 
 router.get('/recent',protect, async(req,res)=> {
@@ -45,6 +45,29 @@ router.get('/recent',protect, async(req,res)=> {
     res.status(500).json({ error: 'Failed to fetch recent activity' });
   }
     });
-=======
+
 module.exports = router;
->>>>>>> Stashed changes
+
+
+router.get('/',protect,async(req,res) => {
+  try{
+    const{startDate, endDate, limit =50 } =req.query;
+
+    const filter = { userId: req.user.id};
+
+    if(startDate){
+      filter.createdAt = { ...filter.createdAt, $gte: new Date(startDate) };
+    }
+    if(endDate){
+      filter.createdAt = { ...filter.createdAt, $lte: new Date(endDate + 'T23:59:59') };
+    }
+    const predictions = await Prediction.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    res.json(predictions);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
