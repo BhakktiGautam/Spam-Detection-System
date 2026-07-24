@@ -6,6 +6,9 @@ require("dotenv").config();
 process.on("unhandledRejection", (reason, promise) => {
   logger.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
+// Add SMART Framework routes
+const smartRoutes = require('./routes/smartRoutes');
+app.use('/api/smart', smartRoutes);
 const dns = require("dns");
 const validateEnv = require('./utils/validateEnv');
 validateEnv(); // Validate environment variables
